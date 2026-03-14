@@ -19,6 +19,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -106,5 +107,56 @@ class UserServiceTest {
         userService.delete(1L);
 
         verify(userRepository).delete(user);
+    }
+
+    // ===== 以下為 TDD 範例新增的測試（Section 12）=====
+
+    @Test
+    @DisplayName("searchByName - 應回傳名稱包含關鍵字的使用者")
+    void searchByName_shouldReturnMatchingUsers() {
+        // Arrange
+        List<User> matched = Arrays.asList(
+                new User("Alice Wang", "alice@example.com"),
+                new User("Alice Chen", "alice.chen@example.com")
+        );
+        when(userRepository.findByNameContainingIgnoreCase("Alice")).thenReturn(matched);
+
+        // Act
+        List<User> result = userService.searchByName("Alice");
+
+        // Assert
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(User::getName)
+                .containsExactly("Alice Wang", "Alice Chen");
+    }
+
+    @Test
+    @DisplayName("searchByName - 空字串應回傳所有使用者")
+    void searchByName_whenBlank_shouldReturnAllUsers() {
+        List<User> allUsers = Arrays.asList(
+                new User("Alice", "alice@example.com"),
+                new User("Bob", "bob@example.com")
+        );
+        when(userRepository.findAll()).thenReturn(allUsers);
+
+        List<User> result = userService.searchByName("");
+
+        assertThat(result).hasSize(2);
+        verify(userRepository).findAll();
+        verify(userRepository, never()).findByNameContainingIgnoreCase(any());
+    }
+
+    @Test
+    @DisplayName("searchByName - null 應回傳所有使用者")
+    void searchByName_whenNull_shouldReturnAllUsers() {
+        List<User> allUsers = Arrays.asList(
+                new User("Alice", "alice@example.com")
+        );
+        when(userRepository.findAll()).thenReturn(allUsers);
+
+        List<User> result = userService.searchByName(null);
+
+        assertThat(result).hasSize(1);
+        verify(userRepository).findAll();
     }
 }

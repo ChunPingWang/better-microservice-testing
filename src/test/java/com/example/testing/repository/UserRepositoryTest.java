@@ -91,4 +91,18 @@ class UserRepositoryTest {
 
         assertThat(users).hasSize(2);
     }
+
+    @Test
+    @DisplayName("findByNameContainingIgnoreCase - 應回傳名稱包含關鍵字的使用者（不分大小寫）")
+    void findByNameContainingIgnoreCase_shouldReturnMatchingUsers() {
+        entityManager.persistAndFlush(new User("Alice Wang", "alice@example.com"));
+        entityManager.persistAndFlush(new User("Bob Smith", "bob@example.com"));
+        entityManager.persistAndFlush(new User("Alice Chen", "alice.chen@example.com"));
+
+        var result = userRepository.findByNameContainingIgnoreCase("alice");
+
+        assertThat(result).hasSize(2);
+        assertThat(result).extracting(User::getName)
+                .containsExactlyInAnyOrder("Alice Wang", "Alice Chen");
+    }
 }

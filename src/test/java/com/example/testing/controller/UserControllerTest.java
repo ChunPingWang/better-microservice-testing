@@ -10,7 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.bean.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -35,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * - 只載入 Web 層相關的 Bean（Controller, Filter, ControllerAdvice）
  * - 不啟動完整 Spring Context，不啟動 Tomcat
  * - 使用 MockMvc 模擬 HTTP 請求
- * - Service 層用 @MockBean 模擬
+ * - Service 層用 @MockitoBean 模擬（Spring Boot 3.4+ 取代 @MockBean）
  */
 @WebMvcTest(UserController.class)
 class UserControllerTest {
@@ -46,7 +46,7 @@ class UserControllerTest {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     private UserService userService;
 
     @Test
@@ -137,5 +137,18 @@ class UserControllerTest {
     void deleteUser_shouldReturn204() throws Exception {
         mockMvc.perform(delete("/api/users/1"))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("GET /api/users/search?name=Alice - 應回傳匹配的使用者")
+    void searchUsers_shouldReturnMatchingUsers() throws Exception {
+        User user1 = new User("Alice Wang", "alice@example.com");
+        user1.setId(1L);
+        when(userService.searchByName("Alice")).thenReturn(Arrays.asList(user1));
+
+        mockMvc.perform(get("/api/users/search").param("name", "Alice"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].name", is("Alice Wang")));
     }
 }

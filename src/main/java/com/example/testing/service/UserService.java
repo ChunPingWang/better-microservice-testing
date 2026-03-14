@@ -38,6 +38,13 @@ public class UserService {
         return userRepository.save(user);
     }
 
+    public List<User> searchByName(String name) {
+        if (name == null || name.isBlank()) {
+            return userRepository.findAll();
+        }
+        return userRepository.findByNameContainingIgnoreCase(name);
+    }
+
     public void delete(Long id) {
         User user = findById(id);
         userRepository.delete(user);
