@@ -5,30 +5,146 @@
 > 大多數教學從 Entity → Repository → Service → Controller 由下而上教，但初學者常常不知道為什麼要這樣分層。
 > 本專案從測試的角度出發——每一層的存在，都是因為它能被獨立測試、獨立驗證。當你理解「這一層該怎麼測」，你就真正理解了「這一層為什麼存在」。
 
+---
+
 ## 目錄
 
-- [1. Swagger 手動測試 vs Spring Boot Test 自動化測試](#1-swagger-手動測試-vs-spring-boot-test-自動化測試)
-- [2. 測試金字塔](#2-測試金字塔)
-- [3. 各類測試詳解](#3-各類測試詳解)
-  - [3.1 Unit Test（單元測試）](#31-unit-test單元測試)
-  - [3.2 @WebMvcTest（Controller 切片測試）](#32-webmvctestcontroller-切片測試)
-  - [3.3 @DataJpaTest（Repository 切片測試）](#33-datajpatestrepository-切片測試)
-  - [3.4 @JsonTest（JSON 序列化測試）](#34-jsontestjson-序列化測試)
-  - [3.5 @RestClientTest（REST Client 測試）](#35-restclienttestrest-client-測試)
-  - [3.6 @SpringBootTest（整合測試）](#36-springboottestintegration-整合測試)
-- [4. Testcontainers 整合](#4-testcontainers-整合)
-- [5. 合約測試（Contract Testing）](#5-合約測試contract-testing)
-- [6. Spring Boot Test 切片測試完整對照表](#6-spring-boot-test-切片測試完整對照表)
-- [7. 如何執行測試](#7-如何執行測試)
-- [8. 從測試看分層：為什麼要分 Controller / Service / Repository？](#8-從測試看分層為什麼要分-controller--service--repository)
-- [9. Test Doubles 全解析：Mock、Stub、Spy、Fake](#9-test-doubles-全解析mockstubspyfake)
-- [10. Arrange-Act-Assert 與好測試的原則](#10-arrange-act-assert-與好測試的原則)
-- [11. 什麼時候該 Mock？什麼時候不該？](#11-什麼時候該-mock什麼時候不該)
-- [12. TDD 實戰示範：先寫測試再寫實作](#12-tdd-實戰示範先寫測試再寫實作)
+- [快速開始](#快速開始)
+- **Part I — 觀念篇**
+  - [1. 從測試看分層：為什麼要分 Controller / Service / Repository？](#1-從測試看分層為什麼要分-controller--service--repository)
+  - [2. 測試金字塔](#2-測試金字塔)
+  - [3. Swagger 手動測試 vs Spring Boot Test 自動化測試](#3-swagger-手動測試-vs-spring-boot-test-自動化測試)
+  - [4. Test Doubles 全解析：Mock、Stub、Spy、Fake](#4-test-doubles-全解析mockstubspyfake)
+  - [5. Arrange-Act-Assert 與好測試的原則](#5-arrange-act-assert-與好測試的原則)
+  - [6. 什麼時候該 Mock？什麼時候不該？](#6-什麼時候該-mock什麼時候不該)
+- **Part II — 實作篇：各類測試詳解**
+  - [7. 切片測試完整對照表](#7-切片測試完整對照表)
+  - [8. Unit Test（單元測試）](#8-unit-test單元測試)
+  - [9. @WebMvcTest（Controller 切片測試）](#9-webmvctestcontroller-切片測試)
+  - [10. @DataJpaTest（Repository 切片測試）](#10-datajpatestrepository-切片測試)
+  - [11. @JsonTest（JSON 序列化測試）](#11-jsontestjson-序列化測試)
+  - [12. @RestClientTest（REST Client 測試）](#12-restclienttestrest-client-測試)
+  - [13. @SpringBootTest（整合測試）](#13-springboottestintegration-整合測試)
+- **Part III — 進階篇**
+  - [14. Testcontainers 整合](#14-testcontainers-整合)
+  - [15. 合約測試（Contract Testing）](#15-合約測試contract-testing)
+  - [16. TDD 實戰示範：先寫測試再寫實作](#16-tdd-實戰示範先寫測試再寫實作)
 
 ---
 
-## 1. Swagger 手動測試 vs Spring Boot Test 自動化測試
+## 快速開始
+
+```bash
+# 執行所有測試（不含 Testcontainers）
+mvn test
+
+# 執行所有測試（含 Testcontainers，需要 Docker）
+mvn test -P testcontainers
+
+# 執行特定測試類別
+mvn test -Dtest=UserServiceTest
+
+# 執行特定 package 下的所有測試
+mvn test -Dtest="com.example.testing.unit.*"
+
+# 執行測試並產生報告
+mvn test surefire-report:report
+```
+
+### 專案結構總覽
+
+```
+src/test/java/com/example/testing/
+├── unit/
+│   ├── UserServiceTest.java           ← Unit Test (Mockito) — 含 TDD 搜尋範例
+│   └── UserServiceSpyTest.java        ← Spy 測試範例 (Mock vs Spy 差異)
+├── controller/
+│   └── UserControllerTest.java        ← @WebMvcTest (切片測試)
+├── repository/
+│   └── UserRepositoryTest.java        ← @DataJpaTest (切片測試)
+├── integration/
+│   └── UserIntegrationTest.java       ← @SpringBootTest (整合測試)
+├── json/
+│   └── UserDtoJsonTest.java           ← @JsonTest (切片測試)
+├── client/
+│   └── ExternalApiClientTest.java     ← @RestClientTest (切片測試)
+└── testcontainers/
+    └── UserPostgresIntegrationTest.java ← Testcontainers (Docker 整合測試)
+```
+
+### 學習建議
+
+1. **先跑測試** — `mvn test`，看看測試如何全部通過
+2. **讀測試程式碼** — 從 `UserServiceTest` 開始，理解 Arrange-Act-Assert 模式
+3. **對照實作** — 看完測試後再看對應的 Service / Controller 實作
+4. **動手破壞** — 故意改壞一行程式碼，看哪個測試先失敗，理解測試的守護範圍
+5. **新增功能** — 試著加一個新的 API（例如搜尋功能），先寫測試再寫實作
+
+---
+
+# Part I — 觀念篇
+
+## 1. 從測試看分層：為什麼要分 Controller / Service / Repository？
+
+> 初學者最常問的問題：「為什麼要分這麼多層？全部寫在 Controller 裡不行嗎？」
+>
+> 答案是：**因為分層讓每一層都能被獨立測試。** 可測試性（Testability）是好架構的核心指標。
+
+### 傳統教學 vs 測試驅動思維
+
+```
+傳統學習路線（由下而上）：
+  Entity → Repository → Service → Controller → 最後才學測試
+  問題：學了半天不知道「分層到底有什麼好處」
+
+測試驅動學習路線（本專案）：
+  先看測試怎麼寫 → 理解每一層為什麼存在 → 再看實作
+  好處：每一層的職責因為「能被怎麼測」而變得清晰
+```
+
+### 每一層為什麼存在？用測試來回答
+
+| 層 | 為什麼獨立存在？ | 測試怎麼證明？ |
+|---|---|---|
+| **Controller** | 負責 HTTP 協議（路由、狀態碼、驗證） | `@WebMvcTest` 不需要 Service 和 DB 就能測試 HTTP 行為 |
+| **Service** | 負責業務邏輯（規則、計算、流程） | `@ExtendWith(MockitoExtension.class)` 不需要 Spring 就能測試邏輯 |
+| **Repository** | 負責資料存取（SQL、查詢方法） | `@DataJpaTest` 不需要 Controller 和 Service 就能測試 DB 操作 |
+| **DTO** | 負責資料傳輸格式（JSON 結構） | `@JsonTest` 不需要任何其他層就能測試 JSON 序列化 |
+| **Client** | 負責呼叫外部 API | `@RestClientTest` 不需要真實外部服務就能測試呼叫邏輯 |
+
+### 一句話總結
+
+> **如果你把所有邏輯放在同一層，你就無法單獨測試任何一件事。**
+> 分層的真正價值，不只是「程式碼整潔」，而是「每一層都能獨立驗證其正確性」。
+
+---
+
+## 2. 測試金字塔
+
+```
+              ╱╲
+             ╱  ╲
+            ╱ E2E╲          ← @SpringBootTest (少量)
+           ╱──────╲           端到端整合測試
+          ╱        ╲
+         ╱  Slice   ╲       ← @WebMvcTest, @DataJpaTest, @JsonTest (適量)
+        ╱   Tests    ╲        切片測試，針對特定層
+       ╱──────────────╲
+      ╱                ╲
+     ╱   Unit Tests     ╲   ← Mockito + JUnit 5 (大量)
+    ╱                    ╲     速度最快，數量最多
+   ╱──────────────────────╲
+```
+
+| 層級 | 測試方式 | 數量 | 速度 | 範圍 |
+|------|---------|------|------|------|
+| **Unit Test** | Mockito + JUnit 5 | 最多 | < 1 秒 | 單一類別 |
+| **Slice Test** | @WebMvcTest 等 | 適量 | 1-3 秒 | 特定層 |
+| **Integration Test** | @SpringBootTest | 最少 | 5-15 秒 | 完整應用 |
+
+---
+
+## 3. Swagger 手動測試 vs Spring Boot Test 自動化測試
 
 許多團隊習慣使用 **Swagger UI** 手動測試 API，這在開發初期方便快速驗證，但存在明顯的限制。Spring Boot Test 提供了更高效、更可靠的測試方式。
 
@@ -70,34 +186,366 @@ Swagger 測試流程：
 
 ---
 
-## 2. 測試金字塔
+## 4. Test Doubles 全解析：Mock、Stub、Spy、Fake
+
+> 初學者常把 Mock、Stub、Spy 全部叫做「Mock」，但它們其實是不同的東西，用途也不同。
+> 理解差異後，你會更清楚「這個測試場景該用哪一種」。
+
+### 四種 Test Double 對照
+
+| 類型 | 一句話解釋 | Mockito 對應 | 什麼時候用？ |
+|------|-----------|-------------|------------|
+| **Stub** | 回傳固定答案的替身 | `when(...).thenReturn(...)` | 你只關心「回傳什麼」，不關心「有沒有被呼叫」 |
+| **Mock** | 會驗證互動的替身 | `verify(mock).method()` | 你需要確認「某個方法確實被呼叫了」 |
+| **Spy** | 包裝真實物件，可部分覆蓋 | `@Spy` + `doReturn(...).when(spy)` | 大部分用真實邏輯，只替換其中一個方法 |
+| **Fake** | 簡化版的真實實作 | 手動寫一個簡化類別 | 真實物件太重（如用 HashMap 取代 DB） |
+
+### 用程式碼說明差異
+
+```java
+// ===== Stub：只設定回傳值，不驗證互動 =====
+@Mock
+private UserRepository userRepository;
+
+@Test
+void stub_example() {
+    // 這是 Stub 行為：「當呼叫 findById 時，回傳這個值」
+    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+    User result = userService.findById(1L);
+
+    // 只驗證結果，不驗證 repository 是否被呼叫
+    assertThat(result.getName()).isEqualTo("Alice");
+}
+
+// ===== Mock：驗證互動（方法是否被呼叫） =====
+@Test
+void mock_example() {
+    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+    userService.delete(1L);
+
+    // 驗證 delete 確實呼叫了 repository.delete()
+    verify(userRepository).delete(user);
+    // 驗證沒有其他多餘的互動
+    verifyNoMoreInteractions(userRepository);
+}
+
+// ===== Spy：真實物件 + 部分覆蓋 =====
+@Spy
+private List<String> spyList = new ArrayList<>();
+
+@Test
+void spy_example() {
+    spyList.add("real");           // 真實呼叫，list 真的加了元素
+    assertThat(spyList).hasSize(1); // 真實結果
+
+    doReturn(100).when(spyList).size(); // 只覆蓋 size() 方法
+    assertThat(spyList.size()).isEqualTo(100); // 被覆蓋的結果
+    assertThat(spyList.get(0)).isEqualTo("real"); // 其他方法仍是真實的
+}
+
+// ===== Fake：手動簡化實作 =====
+// 不用 Mockito，自己寫一個簡化版 Repository
+class FakeUserRepository {
+    private Map<Long, User> store = new HashMap<>();
+    private Long idSeq = 1L;
+
+    public User save(User user) {
+        user.setId(idSeq++);
+        store.put(user.getId(), user);
+        return user;
+    }
+
+    public Optional<User> findById(Long id) {
+        return Optional.ofNullable(store.get(id));
+    }
+}
+```
+
+### Spy 的實際應用場景
+
+**範例檔案**：[`src/test/java/.../unit/UserServiceSpyTest.java`](src/test/java/com/example/testing/unit/UserServiceSpyTest.java)
+
+```java
+@ExtendWith(MockitoExtension.class)
+class UserServiceSpyTest {
+
+    @Mock
+    private UserRepository userRepository;
+
+    @Spy
+    @InjectMocks
+    private UserService userService;
+
+    @Test
+    void update_shouldCallFindByIdInternally() {
+        User existing = new User("Alice", "alice@example.com");
+        existing.setId(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(userRepository.save(any())).thenReturn(existing);
+
+        // Spy 讓我們驗證 update() 內部確實呼叫了 findById()
+        userService.update(1L, new UserDto("Updated", "updated@example.com"));
+
+        // 驗證內部方法呼叫鏈
+        verify(userService).findById(1L);
+        verify(userRepository).save(any(User.class));
+    }
+}
+```
+
+### 選擇指南
 
 ```
-              ╱╲
-             ╱  ╲
-            ╱ E2E╲          ← @SpringBootTest (少量)
-           ╱──────╲           端到端整合測試
-          ╱        ╲
-         ╱  Slice   ╲       ← @WebMvcTest, @DataJpaTest, @JsonTest (適量)
-        ╱   Tests    ╲        切片測試，針對特定層
-       ╱──────────────╲
-      ╱                ╲
-     ╱   Unit Tests     ╲   ← Mockito + JUnit 5 (大量)
-    ╱                    ╲     速度最快，數量最多
-   ╱──────────────────────╲
+你需要什麼？
+  │
+  ├─ 只需要「回傳假資料」→ Stub（when().thenReturn()）
+  │
+  ├─ 需要「驗證某方法有沒有被呼叫」→ Mock（verify()）
+  │
+  ├─ 需要「用真實邏輯，但覆蓋其中一個方法」→ Spy（@Spy）
+  │
+  └─ 需要「完整的替代實作，但比真實物件輕量」→ Fake（手動實作）
 ```
-
-| 層級 | 測試方式 | 數量 | 速度 | 範圍 |
-|------|---------|------|------|------|
-| **Unit Test** | Mockito + JUnit 5 | 最多 | < 1 秒 | 單一類別 |
-| **Slice Test** | @WebMvcTest 等 | 適量 | 1-3 秒 | 特定層 |
-| **Integration Test** | @SpringBootTest | 最少 | 5-15 秒 | 完整應用 |
 
 ---
 
-## 3. 各類測試詳解
+## 5. Arrange-Act-Assert 與好測試的原則
 
-### 3.1 Unit Test（單元測試）
+### 5.1 AAA 模式（Arrange-Act-Assert）
+
+每個測試方法都應該有清晰的三段結構：
+
+```java
+@Test
+void findById_whenExists_shouldReturnUser() {
+    // ===== Arrange（準備）=====
+    // 設定測試資料和前置條件
+    User user = new User("Alice", "alice@example.com");
+    user.setId(1L);
+    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+    // ===== Act（執行）=====
+    // 呼叫被測試的方法（通常只有一行）
+    User result = userService.findById(1L);
+
+    // ===== Assert（驗證）=====
+    // 檢查結果是否符合預期
+    assertThat(result.getName()).isEqualTo("Alice");
+    assertThat(result.getEmail()).isEqualTo("alice@example.com");
+}
+```
+
+**關鍵原則**：
+- **Arrange**：可以很長（準備複雜場景），沒問題
+- **Act**：通常只有 **一行**——就是你要測的那個方法呼叫
+- **Assert**：驗證結果，可以多個斷言，但都應該針對同一個行為的結果
+
+### 5.2 測試命名：讓測試名稱就是文件
+
+好的測試名稱 = **被測方法_場景_預期行為**
+
+```java
+// ✅ 好的命名：讀名稱就知道在測什麼
+void findById_whenExists_shouldReturnUser()
+void findById_whenNotExists_shouldThrowException()
+void create_withValidDto_shouldSaveAndReturnUser()
+void delete_whenUserNotFound_shouldThrowException()
+
+// ❌ 差的命名：不知道在測什麼
+void test1()
+void testFindById()
+void findByIdTest()
+void itWorks()
+```
+
+搭配 `@DisplayName` 提供中文描述，兩全其美：
+
+```java
+@Test
+@DisplayName("findById - 存在時應回傳使用者")
+void findById_whenExists_shouldReturnUser() { ... }
+```
+
+### 5.3 測試行為，不要測實作
+
+```java
+// ❌ 測試實作細節（脆弱：重構就壞）
+@Test
+void create_shouldCallRepositorySaveExactlyOnce() {
+    userService.create(dto);
+    verify(userRepository, times(1)).save(any());
+    // 問題：如果 Service 內部改成 saveAndFlush()，測試就壞了
+    // 但功能其實沒壞！
+}
+
+// ✅ 測試行為（穩固：重構不會壞）
+@Test
+void create_shouldReturnUserWithId() {
+    when(userRepository.save(any())).thenReturn(savedUser);
+
+    User result = userService.create(dto);
+
+    assertThat(result.getId()).isNotNull();
+    assertThat(result.getName()).isEqualTo("Alice");
+    // 只驗證「結果正確」，不管內部怎麼做到的
+}
+```
+
+### 5.4 好測試的 F.I.R.S.T 原則
+
+| 原則 | 說明 | 範例 |
+|------|------|------|
+| **F**ast（快速） | 單元測試應在毫秒內完成 | 不要在 Unit Test 裡連資料庫 |
+| **I**ndependent（獨立） | 測試之間不互相依賴 | 不要依賴其他測試的執行順序 |
+| **R**epeatable（可重複） | 每次執行結果一致 | 不要依賴外部 API、系統時間、隨機數 |
+| **S**elf-validating（自驗證） | 測試自動判斷 pass/fail | 不要靠 `System.out.println` 人眼驗證 |
+| **T**imely（及時） | 在寫產品程式碼時就寫測試 | 不要等上線前才補測試 |
+
+### 5.5 一個測試只測一件事
+
+```java
+// ❌ 一個測試做太多事
+@Test
+void testUserCrud() {
+    // 測建立
+    User created = userService.create(dto);
+    assertThat(created.getId()).isNotNull();
+    // 測查詢
+    User found = userService.findById(created.getId());
+    assertThat(found.getName()).isEqualTo("Alice");
+    // 測刪除
+    userService.delete(created.getId());
+    assertThatThrownBy(() -> userService.findById(created.getId()));
+    // 問題：如果失敗了，是哪一步出錯？
+}
+
+// ✅ 每個測試只驗證一個行為
+@Test void create_shouldReturnUserWithId() { ... }
+@Test void findById_whenExists_shouldReturnUser() { ... }
+@Test void delete_whenExists_shouldRemoveUser() { ... }
+```
+
+> **例外**：Integration Test（如 `UserIntegrationTest.fullCrudFlow()`）可以測完整流程，
+> 因為它的目的就是驗證「端到端流程是否正確」，這是有意的設計。
+
+---
+
+## 6. 什麼時候該 Mock？什麼時候不該？
+
+> Mock 是強大的工具，但濫用 Mock 會讓測試變得脆弱且沒有意義。
+> 核心原則：**在邊界處 Mock，在邊界內用真實物件。**
+
+### 6.1 邊界原則
+
+```
+你的程式碼
+┌──────────────────────────────────┐
+│                                  │
+│   Service ──→ Repository ──→ DB  │ ← DB 是邊界，該 Mock
+│      │                           │
+│      └──→ ExternalApiClient ──→  │ ← 外部 API 是邊界，該 Mock
+│             外部 HTTP 服務        │
+│                                  │
+└──────────────────────────────────┘
+```
+
+### 6.2 該 Mock 的場景
+
+| 場景 | 為什麼要 Mock | 範例 |
+|------|-------------|------|
+| **資料庫存取** | Unit Test 不該依賴 DB | Mock `UserRepository` |
+| **外部 API 呼叫** | 不可控、不穩定、慢 | `MockRestServiceServer` |
+| **第三方服務** | 可能收費、有頻率限制 | Mock 付款 API、SMS API |
+| **系統資源** | 檔案系統、網路、時鐘 | Mock `Clock.now()` 固定時間 |
+| **尚未實作的依賴** | 另一個團隊還沒寫完 | Mock 介面先寫測試 |
+
+### 6.3 不該 Mock 的場景
+
+| 場景 | 為什麼不該 Mock | 該怎麼做 |
+|------|---------------|---------|
+| **被測類別自己** | Mock 了就不是在測它了 | 直接 `new` 或 `@InjectMocks` |
+| **簡單的 Value Object** | DTO、Entity 不需要 Mock | 直接 `new UserDto("Alice", "alice@example.com")` |
+| **Java 標準庫** | `String`、`List`、`Map` 永遠不該 Mock | 用真實物件 |
+| **私有方法** | 想 Mock 私有方法代表設計有問題 | 重構，把邏輯抽到可測的類別 |
+
+### 6.4 過度 Mock 的反模式
+
+```java
+// ❌ 過度 Mock：測試什麼都沒測到
+@Test
+void overMocking_example() {
+    UserDto dto = mock(UserDto.class);            // ❌ DTO 不該 Mock
+    when(dto.getName()).thenReturn("Alice");
+    when(dto.getEmail()).thenReturn("alice@example.com");
+
+    User user = mock(User.class);                 // ❌ Entity 不該 Mock
+    when(user.getId()).thenReturn(1L);
+
+    when(userRepository.save(any())).thenReturn(user);
+
+    User result = userService.create(dto);
+
+    // 這個測試看似通過了，但其實什麼都沒驗證
+    // 因為所有物件都是假的，你只是在測「Mockito 能不能正常運作」
+    verify(userRepository).save(any());
+}
+
+// ✅ 正確做法：只 Mock 邊界依賴
+@Test
+void correctMocking_example() {
+    UserDto dto = new UserDto("Alice", "alice@example.com"); // ✅ 真實 DTO
+    User savedUser = new User("Alice", "alice@example.com"); // ✅ 真實 Entity
+    savedUser.setId(1L);
+    when(userRepository.save(any(User.class))).thenReturn(savedUser); // ✅ 只 Mock Repository
+
+    User result = userService.create(dto);
+
+    assertThat(result.getId()).isEqualTo(1L);
+    assertThat(result.getName()).isEqualTo("Alice");
+}
+```
+
+### 6.5 判斷流程圖
+
+```
+你要測試的依賴是什麼？
+  │
+  ├─ 資料庫 / 外部 API / 第三方服務 / 檔案系統
+  │   └─→ ✅ Mock 它
+  │
+  ├─ DTO / Entity / Value Object / 標準庫
+  │   └─→ ❌ 不要 Mock，用真實物件
+  │
+  ├─ 你自己寫的另一個 Service
+  │   ├─ 在 Unit Test 中 → ✅ Mock 它（隔離測試）
+  │   └─ 在 Integration Test 中 → ❌ 用真實的（驗證協作）
+  │
+  └─ 被測試的類別本身
+      └─→ ❌ 絕對不要 Mock（那還測什麼？）
+```
+
+---
+
+# Part II — 實作篇：各類測試詳解
+
+## 7. 切片測試完整對照表
+
+| 註解 | 測試對象 | 載入的 Bean | 典型用途 |
+|------|---------|------------|---------|
+| `@WebMvcTest` | Controller | Controller, Filter, ControllerAdvice | REST API 路由與驗證 |
+| `@DataJpaTest` | Repository | Entity, Repository, EntityManager | JPA Query 測試 |
+| `@DataMongoTest` | MongoDB Repository | MongoTemplate, MongoRepository | MongoDB 操作測試 |
+| `@DataRedisTest` | Redis Repository | RedisTemplate | Redis 操作測試 |
+| `@JdbcTest` | JDBC | JdbcTemplate, DataSource | 原生 SQL 測試 |
+| `@JsonTest` | JSON 序列化 | ObjectMapper, JacksonTester | JSON 格式驗證 |
+| `@RestClientTest` | REST Client | RestTemplate, MockRestServiceServer | 外部 API 呼叫 |
+| `@WebFluxTest` | WebFlux Controller | WebTestClient | Reactive 端點測試 |
+
+---
+
+## 8. Unit Test（單元測試）
 
 **目的**：測試單一類別的業務邏輯，完全隔離外部依賴。
 
@@ -143,7 +591,7 @@ class UserServiceTest {
 
 ---
 
-### 3.2 @WebMvcTest（Controller 切片測試）
+## 9. @WebMvcTest（Controller 切片測試）
 
 **目的**：測試 Controller 層的路由、HTTP 狀態碼、請求/回應格式、參數驗證。
 
@@ -191,7 +639,7 @@ class UserControllerTest {
 
 ---
 
-### 3.3 @DataJpaTest（Repository 切片測試）
+## 10. @DataJpaTest（Repository 切片測試）
 
 **目的**：測試 JPA Repository 的 Query Method、自定義查詢。
 
@@ -229,7 +677,7 @@ class UserRepositoryTest {
 
 ---
 
-### 3.4 @JsonTest（JSON 序列化測試）
+## 11. @JsonTest（JSON 序列化測試）
 
 **目的**：測試 DTO / Value Object 的 JSON 序列化與反序列化。
 
@@ -271,7 +719,7 @@ class UserDtoJsonTest {
 
 ---
 
-### 3.5 @RestClientTest（REST Client 測試）
+## 12. @RestClientTest（REST Client 測試）
 
 **目的**：測試應用程式呼叫外部 API 的行為。
 
@@ -311,7 +759,7 @@ class ExternalApiClientTest {
 
 ---
 
-### 3.6 @SpringBootTest（Integration 整合測試）
+## 13. @SpringBootTest（Integration 整合測試）
 
 **目的**：端到端驗證完整的 Controller → Service → Repository 流程。
 
@@ -349,7 +797,9 @@ class UserIntegrationTest {
 
 ---
 
-## 4. Testcontainers 整合
+# Part III — 進階篇
+
+## 14. Testcontainers 整合
 
 ### 為什麼需要 Testcontainers？
 
@@ -428,8 +878,6 @@ class UserPostgresIntegrationTest {
 
 ### Testcontainers 支援的服務
 
-除了 PostgreSQL，Testcontainers 還支援：
-
 | 服務 | Artifact | 用途 |
 |------|----------|------|
 | MySQL | `testcontainers:mysql` | MySQL 資料庫測試 |
@@ -447,7 +895,7 @@ class UserPostgresIntegrationTest {
 
 ---
 
-## 5. 合約測試（Contract Testing）
+## 15. 合約測試（Contract Testing）
 
 ### 三者的關係：Design by Contract、Contract Test、Spring Cloud Contract
 
@@ -473,7 +921,7 @@ Spring Cloud Contract
      提供 DSL 定義契約、自動產生測試與 Stub
 ```
 
-### 5.1 Design by Contract（契約式設計）
+### 15.1 Design by Contract（契約式設計）
 
 **本質**：一種**軟體設計原則**，源自 Bertrand Meyer 在 1986 年設計的 Eiffel 程式語言。
 
@@ -508,7 +956,7 @@ public class UserService {
 
 **重點**：DbC 是一種**設計思想**，不是測試框架。它影響了 Contract Test 的概念。
 
-### 5.2 Contract Test（合約測試）
+### 15.2 Contract Test（合約測試）
 
 **本質**：一種**測試策略**，用於微服務架構中驗證服務之間的 API 契約。
 
@@ -531,7 +979,7 @@ Service A (Consumer)  ←── HTTP ──→  Service B (Producer)
 4. Producer 改 API 時，契約測試先失敗 → 提前發現破壞性變更
 ```
 
-### 5.3 Spring Cloud Contract
+### 15.3 Spring Cloud Contract
 
 **本質**：Contract Test 策略的**具體實作框架**。
 
@@ -678,7 +1126,7 @@ class UserClientContractTest {
 }
 ```
 
-### 5.4 實作建議
+### 15.4 實作建議
 
 | 情境 | 建議 |
 |------|------|
@@ -695,454 +1143,12 @@ class UserClientContractTest {
 
 ---
 
-## 6. Spring Boot Test 切片測試完整對照表
-
-| 註解 | 測試對象 | 載入的 Bean | 典型用途 |
-|------|---------|------------|---------|
-| `@WebMvcTest` | Controller | Controller, Filter, ControllerAdvice | REST API 路由與驗證 |
-| `@DataJpaTest` | Repository | Entity, Repository, EntityManager | JPA Query 測試 |
-| `@DataMongoTest` | MongoDB Repository | MongoTemplate, MongoRepository | MongoDB 操作測試 |
-| `@DataRedisTest` | Redis Repository | RedisTemplate | Redis 操作測試 |
-| `@JdbcTest` | JDBC | JdbcTemplate, DataSource | 原生 SQL 測試 |
-| `@JsonTest` | JSON 序列化 | ObjectMapper, JacksonTester | JSON 格式驗證 |
-| `@RestClientTest` | REST Client | RestTemplate, MockRestServiceServer | 外部 API 呼叫 |
-| `@WebFluxTest` | WebFlux Controller | WebTestClient | Reactive 端點測試 |
-
----
-
-## 7. 如何執行測試
-
-```bash
-# 執行所有測試（不含 Testcontainers）
-mvn test
-
-# 執行所有測試（含 Testcontainers，需要 Docker）
-mvn test -P testcontainers
-
-# 執行特定測試類別
-mvn test -Dtest=UserServiceTest
-
-# 執行特定 package 下的所有測試
-mvn test -Dtest="com.example.testing.unit.*"
-
-# 執行測試並產生報告
-mvn test surefire-report:report
-```
-
-### 專案結構總覽
-
-```
-src/test/java/com/example/testing/
-├── unit/
-│   ├── UserServiceTest.java           ← Unit Test (Mockito) — 含 TDD 搜尋範例
-│   └── UserServiceSpyTest.java        ← Spy 測試範例 (Mock vs Spy 差異)
-├── controller/
-│   └── UserControllerTest.java        ← @WebMvcTest (切片測試)
-├── repository/
-│   └── UserRepositoryTest.java        ← @DataJpaTest (切片測試)
-├── integration/
-│   └── UserIntegrationTest.java       ← @SpringBootTest (整合測試)
-├── json/
-│   └── UserDtoJsonTest.java           ← @JsonTest (切片測試)
-├── client/
-│   └── ExternalApiClientTest.java     ← @RestClientTest (切片測試)
-└── testcontainers/
-    └── UserPostgresIntegrationTest.java ← Testcontainers (Docker 整合測試)
-```
-
----
-
-## 8. 從測試看分層：為什麼要分 Controller / Service / Repository？
-
-> 初學者最常問的問題：「為什麼要分這麼多層？全部寫在 Controller 裡不行嗎？」
->
-> 答案是：**因為分層讓每一層都能被獨立測試。** 可測試性（Testability）是好架構的核心指標。
-
-### 傳統教學 vs 測試驅動思維
-
-```
-傳統學習路線（由下而上）：
-  Entity → Repository → Service → Controller → 最後才學測試
-  問題：學了半天不知道「分層到底有什麼好處」
-
-測試驅動學習路線（本專案）：
-  先看測試怎麼寫 → 理解每一層為什麼存在 → 再看實作
-  好處：每一層的職責因為「能被怎麼測」而變得清晰
-```
-
-### 每一層為什麼存在？用測試來回答
-
-| 層 | 為什麼獨立存在？ | 測試怎麼證明？ |
-|---|---|---|
-| **Controller** | 負責 HTTP 協議（路由、狀態碼、驗證） | `@WebMvcTest` 不需要 Service 和 DB 就能測試 HTTP 行為 |
-| **Service** | 負責業務邏輯（規則、計算、流程） | `@ExtendWith(MockitoExtension.class)` 不需要 Spring 就能測試邏輯 |
-| **Repository** | 負責資料存取（SQL、查詢方法） | `@DataJpaTest` 不需要 Controller 和 Service 就能測試 DB 操作 |
-| **DTO** | 負責資料傳輸格式（JSON 結構） | `@JsonTest` 不需要任何其他層就能測試 JSON 序列化 |
-| **Client** | 負責呼叫外部 API | `@RestClientTest` 不需要真實外部服務就能測試呼叫邏輯 |
-
-### 一句話總結
-
-> **如果你把所有邏輯放在同一層，你就無法單獨測試任何一件事。**
-> 分層的真正價值，不只是「程式碼整潔」，而是「每一層都能獨立驗證其正確性」。
-
-### 學習建議
-
-1. **先跑測試** — `mvn test`，看看 30 個測試如何全部通過
-2. **讀測試程式碼** — 從 `UserServiceTest` 開始，理解 Arrange-Act-Assert 模式
-3. **對照實作** — 看完測試後再看對應的 Service / Controller 實作
-4. **動手破壞** — 故意改壞一行程式碼，看哪個測試先失敗，理解測試的守護範圍
-5. **新增功能** — 試著加一個新的 API（例如搜尋功能），先寫測試再寫實作
-
----
-
-## 9. Test Doubles 全解析：Mock、Stub、Spy、Fake
-
-> 初學者常把 Mock、Stub、Spy 全部叫做「Mock」，但它們其實是不同的東西，用途也不同。
-> 理解差異後，你會更清楚「這個測試場景該用哪一種」。
-
-### 四種 Test Double 對照
-
-| 類型 | 一句話解釋 | Mockito 對應 | 什麼時候用？ |
-|------|-----------|-------------|------------|
-| **Stub** | 回傳固定答案的替身 | `when(...).thenReturn(...)` | 你只關心「回傳什麼」，不關心「有沒有被呼叫」 |
-| **Mock** | 會驗證互動的替身 | `verify(mock).method()` | 你需要確認「某個方法確實被呼叫了」 |
-| **Spy** | 包裝真實物件，可部分覆蓋 | `@Spy` + `doReturn(...).when(spy)` | 大部分用真實邏輯，只替換其中一個方法 |
-| **Fake** | 簡化版的真實實作 | 手動寫一個簡化類別 | 真實物件太重（如用 HashMap 取代 DB） |
-
-### 用程式碼說明差異
-
-```java
-// ===== Stub：只設定回傳值，不驗證互動 =====
-@Mock
-private UserRepository userRepository;
-
-@Test
-void stub_example() {
-    // 這是 Stub 行為：「當呼叫 findById 時，回傳這個值」
-    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-    User result = userService.findById(1L);
-
-    // 只驗證結果，不驗證 repository 是否被呼叫
-    assertThat(result.getName()).isEqualTo("Alice");
-}
-
-// ===== Mock：驗證互動（方法是否被呼叫） =====
-@Test
-void mock_example() {
-    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-    userService.delete(1L);
-
-    // 驗證 delete 確實呼叫了 repository.delete()
-    verify(userRepository).delete(user);
-    // 驗證沒有其他多餘的互動
-    verifyNoMoreInteractions(userRepository);
-}
-
-// ===== Spy：真實物件 + 部分覆蓋 =====
-@Spy
-private List<String> spyList = new ArrayList<>();
-
-@Test
-void spy_example() {
-    spyList.add("real");           // 真實呼叫，list 真的加了元素
-    assertThat(spyList).hasSize(1); // 真實結果
-
-    doReturn(100).when(spyList).size(); // 只覆蓋 size() 方法
-    assertThat(spyList.size()).isEqualTo(100); // 被覆蓋的結果
-    assertThat(spyList.get(0)).isEqualTo("real"); // 其他方法仍是真實的
-}
-
-// ===== Fake：手動簡化實作 =====
-// 不用 Mockito，自己寫一個簡化版 Repository
-class FakeUserRepository {
-    private Map<Long, User> store = new HashMap<>();
-    private Long idSeq = 1L;
-
-    public User save(User user) {
-        user.setId(idSeq++);
-        store.put(user.getId(), user);
-        return user;
-    }
-
-    public Optional<User> findById(Long id) {
-        return Optional.ofNullable(store.get(id));
-    }
-}
-```
-
-### Spy 的實際應用場景
-
-**範例檔案**：[`src/test/java/.../unit/UserServiceSpyTest.java`](src/test/java/com/example/testing/unit/UserServiceSpyTest.java)
-
-```java
-@ExtendWith(MockitoExtension.class)
-class UserServiceSpyTest {
-
-    @Mock
-    private UserRepository userRepository;
-
-    @Spy
-    @InjectMocks
-    private UserService userService;
-
-    @Test
-    void update_shouldCallFindByIdInternally() {
-        User existing = new User("Alice", "alice@example.com");
-        existing.setId(1L);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(userRepository.save(any())).thenReturn(existing);
-
-        // Spy 讓我們驗證 update() 內部確實呼叫了 findById()
-        userService.update(1L, new UserDto("Updated", "updated@example.com"));
-
-        // 驗證內部方法呼叫鏈
-        verify(userService).findById(1L);
-        verify(userRepository).save(any(User.class));
-    }
-}
-```
-
-### 選擇指南
-
-```
-你需要什麼？
-  │
-  ├─ 只需要「回傳假資料」→ Stub（when().thenReturn()）
-  │
-  ├─ 需要「驗證某方法有沒有被呼叫」→ Mock（verify()）
-  │
-  ├─ 需要「用真實邏輯，但覆蓋其中一個方法」→ Spy（@Spy）
-  │
-  └─ 需要「完整的替代實作，但比真實物件輕量」→ Fake（手動實作）
-```
-
----
-
-## 10. Arrange-Act-Assert 與好測試的原則
-
-### 10.1 AAA 模式（Arrange-Act-Assert）
-
-每個測試方法都應該有清晰的三段結構：
-
-```java
-@Test
-void findById_whenExists_shouldReturnUser() {
-    // ===== Arrange（準備）=====
-    // 設定測試資料和前置條件
-    User user = new User("Alice", "alice@example.com");
-    user.setId(1L);
-    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-    // ===== Act（執行）=====
-    // 呼叫被測試的方法（通常只有一行）
-    User result = userService.findById(1L);
-
-    // ===== Assert（驗證）=====
-    // 檢查結果是否符合預期
-    assertThat(result.getName()).isEqualTo("Alice");
-    assertThat(result.getEmail()).isEqualTo("alice@example.com");
-}
-```
-
-**關鍵原則**：
-- **Arrange**：可以很長（準備複雜場景），沒問題
-- **Act**：通常只有 **一行**——就是你要測的那個方法呼叫
-- **Assert**：驗證結果，可以多個斷言，但都應該針對同一個行為的結果
-
-### 10.2 測試命名：讓測試名稱就是文件
-
-好的測試名稱 = **被測方法_場景_預期行為**
-
-```java
-// ✅ 好的命名：讀名稱就知道在測什麼
-void findById_whenExists_shouldReturnUser()
-void findById_whenNotExists_shouldThrowException()
-void create_withValidDto_shouldSaveAndReturnUser()
-void delete_whenUserNotFound_shouldThrowException()
-
-// ❌ 差的命名：不知道在測什麼
-void test1()
-void testFindById()
-void findByIdTest()
-void itWorks()
-```
-
-搭配 `@DisplayName` 提供中文描述，兩全其美：
-
-```java
-@Test
-@DisplayName("findById - 存在時應回傳使用者")
-void findById_whenExists_shouldReturnUser() { ... }
-```
-
-### 10.3 測試行為，不要測實作
-
-```java
-// ❌ 測試實作細節（脆弱：重構就壞）
-@Test
-void create_shouldCallRepositorySaveExactlyOnce() {
-    userService.create(dto);
-    verify(userRepository, times(1)).save(any());
-    // 問題：如果 Service 內部改成 saveAndFlush()，測試就壞了
-    // 但功能其實沒壞！
-}
-
-// ✅ 測試行為（穩固：重構不會壞）
-@Test
-void create_shouldReturnUserWithId() {
-    when(userRepository.save(any())).thenReturn(savedUser);
-
-    User result = userService.create(dto);
-
-    assertThat(result.getId()).isNotNull();
-    assertThat(result.getName()).isEqualTo("Alice");
-    // 只驗證「結果正確」，不管內部怎麼做到的
-}
-```
-
-### 10.4 好測試的 F.I.R.S.T 原則
-
-| 原則 | 說明 | 範例 |
-|------|------|------|
-| **F**ast（快速） | 單元測試應在毫秒內完成 | 不要在 Unit Test 裡連資料庫 |
-| **I**ndependent（獨立） | 測試之間不互相依賴 | 不要依賴其他測試的執行順序 |
-| **R**epeatable（可重複） | 每次執行結果一致 | 不要依賴外部 API、系統時間、隨機數 |
-| **S**elf-validating（自驗證） | 測試自動判斷 pass/fail | 不要靠 `System.out.println` 人眼驗證 |
-| **T**imely（及時） | 在寫產品程式碼時就寫測試 | 不要等上線前才補測試 |
-
-### 10.5 一個測試只測一件事
-
-```java
-// ❌ 一個測試做太多事
-@Test
-void testUserCrud() {
-    // 測建立
-    User created = userService.create(dto);
-    assertThat(created.getId()).isNotNull();
-    // 測查詢
-    User found = userService.findById(created.getId());
-    assertThat(found.getName()).isEqualTo("Alice");
-    // 測刪除
-    userService.delete(created.getId());
-    assertThatThrownBy(() -> userService.findById(created.getId()));
-    // 問題：如果失敗了，是哪一步出錯？
-}
-
-// ✅ 每個測試只驗證一個行為
-@Test void create_shouldReturnUserWithId() { ... }
-@Test void findById_whenExists_shouldReturnUser() { ... }
-@Test void delete_whenExists_shouldRemoveUser() { ... }
-```
-
-> **例外**：Integration Test（如 `UserIntegrationTest.fullCrudFlow()`）可以測完整流程，
-> 因為它的目的就是驗證「端到端流程是否正確」，這是有意的設計。
-
----
-
-## 11. 什麼時候該 Mock？什麼時候不該？
-
-> Mock 是強大的工具，但濫用 Mock 會讓測試變得脆弱且沒有意義。
-> 核心原則：**在邊界處 Mock，在邊界內用真實物件。**
-
-### 11.1 邊界原則
-
-```
-你的程式碼
-┌──────────────────────────────────┐
-│                                  │
-│   Service ──→ Repository ──→ DB  │ ← DB 是邊界，該 Mock
-│      │                           │
-│      └──→ ExternalApiClient ──→  │ ← 外部 API 是邊界，該 Mock
-│             外部 HTTP 服務        │
-│                                  │
-└──────────────────────────────────┘
-```
-
-### 11.2 該 Mock 的場景
-
-| 場景 | 為什麼要 Mock | 範例 |
-|------|-------------|------|
-| **資料庫存取** | Unit Test 不該依賴 DB | Mock `UserRepository` |
-| **外部 API 呼叫** | 不可控、不穩定、慢 | `MockRestServiceServer` |
-| **第三方服務** | 可能收費、有頻率限制 | Mock 付款 API、SMS API |
-| **系統資源** | 檔案系統、網路、時鐘 | Mock `Clock.now()` 固定時間 |
-| **尚未實作的依賴** | 另一個團隊還沒寫完 | Mock 介面先寫測試 |
-
-### 11.3 不該 Mock 的場景
-
-| 場景 | 為什麼不該 Mock | 該怎麼做 |
-|------|---------------|---------|
-| **被測類別自己** | Mock 了就不是在測它了 | 直接 `new` 或 `@InjectMocks` |
-| **簡單的 Value Object** | DTO、Entity 不需要 Mock | 直接 `new UserDto("Alice", "alice@example.com")` |
-| **Java 標準庫** | `String`、`List`、`Map` 永遠不該 Mock | 用真實物件 |
-| **私有方法** | 想 Mock 私有方法代表設計有問題 | 重構，把邏輯抽到可測的類別 |
-
-### 11.4 過度 Mock 的反模式
-
-```java
-// ❌ 過度 Mock：測試什麼都沒測到
-@Test
-void overMocking_example() {
-    UserDto dto = mock(UserDto.class);            // ❌ DTO 不該 Mock
-    when(dto.getName()).thenReturn("Alice");
-    when(dto.getEmail()).thenReturn("alice@example.com");
-
-    User user = mock(User.class);                 // ❌ Entity 不該 Mock
-    when(user.getId()).thenReturn(1L);
-
-    when(userRepository.save(any())).thenReturn(user);
-
-    User result = userService.create(dto);
-
-    // 這個測試看似通過了，但其實什麼都沒驗證
-    // 因為所有物件都是假的，你只是在測「Mockito 能不能正常運作」
-    verify(userRepository).save(any());
-}
-
-// ✅ 正確做法：只 Mock 邊界依賴
-@Test
-void correctMocking_example() {
-    UserDto dto = new UserDto("Alice", "alice@example.com"); // ✅ 真實 DTO
-    User savedUser = new User("Alice", "alice@example.com"); // ✅ 真實 Entity
-    savedUser.setId(1L);
-    when(userRepository.save(any(User.class))).thenReturn(savedUser); // ✅ 只 Mock Repository
-
-    User result = userService.create(dto);
-
-    assertThat(result.getId()).isEqualTo(1L);
-    assertThat(result.getName()).isEqualTo("Alice");
-}
-```
-
-### 11.5 判斷流程圖
-
-```
-你要測試的依賴是什麼？
-  │
-  ├─ 資料庫 / 外部 API / 第三方服務 / 檔案系統
-  │   └─→ ✅ Mock 它
-  │
-  ├─ DTO / Entity / Value Object / 標準庫
-  │   └─→ ❌ 不要 Mock，用真實物件
-  │
-  ├─ 你自己寫的另一個 Service
-  │   ├─ 在 Unit Test 中 → ✅ Mock 它（隔離測試）
-  │   └─ 在 Integration Test 中 → ❌ 用真實的（驗證協作）
-  │
-  └─ 被測試的類別本身
-      └─→ ❌ 絕對不要 Mock（那還測什麼？）
-```
-
----
-
-## 12. TDD 實戰示範：先寫測試再寫實作
+## 16. TDD 實戰示範：先寫測試再寫實作
 
 > TDD（Test-Driven Development）的核心是 **Red → Green → Refactor** 循環。
 > 用本專案的 UserService 新增一個「根據名稱搜尋」的功能來示範。
 
-### 12.1 Red-Green-Refactor 循環
+### 16.1 Red-Green-Refactor 循環
 
 ```
     ┌─── Red ──────────────────┐
@@ -1165,7 +1171,7 @@ void correctMocking_example() {
                └──→ 回到 Red，加下一個測試
 ```
 
-### 12.2 實戰：為 UserService 新增搜尋功能
+### 16.2 實戰：為 UserService 新增搜尋功能
 
 #### Step 1: Red — 先寫失敗的測試
 
@@ -1252,7 +1258,7 @@ void searchByName_whenBlank_shouldReturnAllUsers() {
 - 對應的 `@WebMvcTest` 測試
 - Repository 的 `@DataJpaTest` 測試確認 `findByNameContainingIgnoreCase` 真的能查到資料
 
-### 12.3 TDD 的好處
+### 16.3 TDD 的好處
 
 | 好處 | 說明 |
 |------|------|
@@ -1261,7 +1267,7 @@ void searchByName_whenBlank_shouldReturnAllUsers() {
 | **安全重構** | 有測試保護，重構不會怕 |
 | **活文件** | 測試就是最新的規格說明書 |
 
-### 12.4 TDD 不是教條
+### 16.4 TDD 不是教條
 
 > 不需要「所有程式碼都用 TDD」。以下是實用建議：
 
