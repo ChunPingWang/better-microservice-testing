@@ -1,6 +1,14 @@
-# Spring Boot Testing Guide — 完整測試指南
+# 微服務開發中，最困難的其實是測試
 
-> 本專案提供一套完整的 Spring Boot 微服務測試範例，涵蓋從單元測試到整合測試的各種策略，並附帶可運行的範例程式碼。
+微服務開發中，我覺得最困難的就是測試。
+
+試想，在這麼多服務與 API 的交互作用下，每增加一個微服務，測試的難度可能是以指數級方式成長。回首過去與現在，很多人還是習慣啟動服務，再用 Swagger 執行測試。系統複雜度不高、微服務與 API 數量不多時，這樣做問題不大。但大規模開發時，這樣做是最佳解嗎？更不要說，加上容器與 K8s 所產生的額外負擔。
+
+如果你是用 Spring Boot 開發微服務，**強烈推薦深入研究 Spring Boot Test**，因為 Spring 開發團隊早就為你準備好測試所需要的一切。
+
+在這裡，我整理了一些微服務測試所需要的案例與方法，提供大家參考。
+
+---
 
 ## 目錄
 
@@ -22,7 +30,11 @@
 
 ## 1. Swagger 手動測試 vs Spring Boot Test 自動化測試
 
-許多團隊習慣使用 **Swagger UI** 手動測試 API，這在開發初期方便快速驗證，但存在明顯的限制。Spring Boot Test 提供了更高效、更可靠的測試方式。
+相信很多團隊都有這樣的經驗：開發完一個 API，第一件事就是打開 **Swagger UI**，手動輸入參數、按下 Execute，看回應是不是正確的。開發初期，這樣做直覺又快速，沒什麼問題。
+
+但隨著微服務數量增長，你會發現：**每次改一個 API，就得手動重測一輪相關的功能**。更麻煩的是，Swagger 測試必須先啟動整個應用程式，光是等待啟動就要花上好幾十秒。
+
+Spring Boot Test 提供了一個完全不同的思路。
 
 ### 核心差異：需不需要啟動整包程式？
 
@@ -39,7 +51,7 @@
 
 ### 為什麼 Spring Boot Test 可以不啟動整包程式？
 
-Spring Boot 提供了**切片測試（Slice Test）**機制，關鍵在於 **Application Context 的選擇性載入**：
+這是我覺得 Spring Boot Test 最厲害的地方 — **切片測試（Slice Test）**。它的關鍵在於 Application Context 的選擇性載入：
 
 ```
 Swagger 測試流程：
@@ -53,9 +65,9 @@ Swagger 測試流程：
 
 這就是為什麼 `@WebMvcTest` 只需 1-3 秒，而啟動整個應用需要 10-30 秒以上。
 
-### 結論
+### 小結
 
-> **Swagger 適合開發階段的快速 API 探索和文件產出**，但不能取代自動化測試。
+> **Swagger 適合開發階段的快速 API 探索和文件產出**，但它不能取代自動化測試。
 > **Spring Boot Test 才是保障程式品質和持續交付的正確方式。**
 >
 > 最佳實踐：兩者搭配使用 — Swagger 做 API 文件 + 互動式探索，Spring Boot Test 做自動化品質保障。
@@ -63,6 +75,8 @@ Swagger 測試流程：
 ---
 
 ## 2. 測試金字塔
+
+在設計測試策略時，測試金字塔是一個很好的參考框架。底層的測試寫得越多、跑得越快；頂層的測試只挑關鍵流程來寫。
 
 ```
               ╱╲
@@ -89,14 +103,11 @@ Swagger 測試流程：
 
 ## 3. 各類測試詳解
 
+接下來，我用一個簡單的 User CRUD 微服務，示範每一種測試怎麼寫。所有範例都可以在這個 repo 中直接執行。
+
 ### 3.1 Unit Test（單元測試）
 
-**目的**：測試單一類別的業務邏輯，完全隔離外部依賴。
-
-**特點**：
-- 不啟動 Spring Context → 速度最快
-- 使用 `@Mock` 模擬依賴、`@InjectMocks` 注入被測對象
-- 專注驗證邏輯正確性
+這是最基本、也是你應該寫最多的測試。不啟動 Spring Context，速度最快，專注驗證單一類別的業務邏輯。
 
 **範例檔案**：[`src/test/java/.../unit/UserServiceTest.java`](src/test/java/com/example/testing/unit/UserServiceTest.java)
 
@@ -137,12 +148,7 @@ class UserServiceTest {
 
 ### 3.2 @WebMvcTest（Controller 切片測試）
 
-**目的**：測試 Controller 層的路由、HTTP 狀態碼、請求/回應格式、參數驗證。
-
-**特點**：
-- 只載入 Web 層 Bean（Controller, ControllerAdvice, Filter）
-- **不啟動 Tomcat**，使用 MockMvc 模擬 HTTP 請求
-- Service 層用 `@MockBean` 替代
+當你只想測 Controller 的路由、HTTP 狀態碼、請求驗證，而不想等整個應用啟動時，`@WebMvcTest` 就是你的好朋友。它只載入 Web 層的 Bean，**不啟動 Tomcat**。
 
 **範例檔案**：[`src/test/java/.../controller/UserControllerTest.java`](src/test/java/com/example/testing/controller/UserControllerTest.java)
 
@@ -185,12 +191,7 @@ class UserControllerTest {
 
 ### 3.3 @DataJpaTest（Repository 切片測試）
 
-**目的**：測試 JPA Repository 的 Query Method、自定義查詢。
-
-**特點**：
-- 只載入 JPA 相關 Bean（Entity, Repository, EntityManager）
-- 預設使用 H2 記憶體資料庫
-- 每個測試方法結束後自動 Rollback
+想驗證你的 Repository Query Method 是否正確？`@DataJpaTest` 只載入 JPA 相關的 Bean，搭配 H2 記憶體資料庫，每個測試結束後自動 Rollback，乾淨又快速。
 
 **範例檔案**：[`src/test/java/.../repository/UserRepositoryTest.java`](src/test/java/com/example/testing/repository/UserRepositoryTest.java)
 
@@ -223,12 +224,7 @@ class UserRepositoryTest {
 
 ### 3.4 @JsonTest（JSON 序列化測試）
 
-**目的**：測試 DTO / Value Object 的 JSON 序列化與反序列化。
-
-**特點**：
-- 只載入 JSON 相關 Bean（ObjectMapper, JacksonTester）
-- 不載入 Web 層、資料庫
-- 適合驗證 `@JsonProperty`、`@JsonIgnore`、`@JsonFormat` 等
+在微服務之間，JSON 是最常見的資料交換格式。如果序列化/反序列化出了問題，debug 起來往往很痛苦。`@JsonTest` 讓你可以單獨驗證 DTO 的 JSON 行為，不需要啟動 Web 層或資料庫。
 
 **範例檔案**：[`src/test/java/.../json/UserDtoJsonTest.java`](src/test/java/com/example/testing/json/UserDtoJsonTest.java)
 
@@ -265,12 +261,7 @@ class UserDtoJsonTest {
 
 ### 3.5 @RestClientTest（REST Client 測試）
 
-**目的**：測試應用程式呼叫外部 API 的行為。
-
-**特點**：
-- 只載入指定的 Client 元件
-- 使用 `MockRestServiceServer` 模擬外部 API 回應
-- 不需要真實的外部服務
+微服務之間經常需要呼叫其他服務的 API。但測試時，你不可能要求所有外部服務都跑起來。`@RestClientTest` 搭配 `MockRestServiceServer`，讓你模擬外部 API 的回應，完全不需要真實的外部服務。
 
 **範例檔案**：[`src/test/java/.../client/ExternalApiClientTest.java`](src/test/java/com/example/testing/client/ExternalApiClientTest.java)
 
@@ -305,12 +296,7 @@ class ExternalApiClientTest {
 
 ### 3.6 @SpringBootTest（Integration 整合測試）
 
-**目的**：端到端驗證完整的 Controller → Service → Repository 流程。
-
-**特點**：
-- 啟動完整 Spring Context + 內嵌 Tomcat
-- 使用 `TestRestTemplate` 發送真實 HTTP 請求
-- 最接近生產環境，但速度最慢
+當你需要端到端驗證完整的 Controller → Service → Repository 流程時，就用 `@SpringBootTest`。它會啟動完整的 Spring Context + 內嵌 Tomcat，最接近生產環境，但也是速度最慢的。所以建議只針對關鍵業務流程來寫。
 
 **範例檔案**：[`src/test/java/.../integration/UserIntegrationTest.java`](src/test/java/com/example/testing/integration/UserIntegrationTest.java)
 
@@ -343,9 +329,11 @@ class UserIntegrationTest {
 
 ## 4. Testcontainers 整合
 
-### 為什麼需要 Testcontainers？
+### 你踩過這個坑嗎？
 
-使用 H2 記憶體資料庫做測試雖然方便快速，但存在問題：
+用 H2 記憶體資料庫跑測試，全部綠燈通過。部署到生產環境連上 PostgreSQL，結果直接炸掉。
+
+這不是你的問題，是 H2 跟真實資料庫本來就有差異：
 
 | 問題 | 說明 |
 |------|------|
@@ -420,7 +408,7 @@ class UserPostgresIntegrationTest {
 
 ### Testcontainers 支援的服務
 
-除了 PostgreSQL，Testcontainers 還支援：
+除了 PostgreSQL，Testcontainers 還支援很多常見的基礎設施：
 
 | 服務 | Artifact | 用途 |
 |------|----------|------|
@@ -440,6 +428,10 @@ class UserPostgresIntegrationTest {
 ---
 
 ## 5. 合約測試（Contract Testing）
+
+微服務架構中，還有一個常被忽略但極其重要的測試面向：**服務之間的 API 契約**。
+
+當 Service B 悄悄改了回應格式，Service A 完全不知道，直到上線那一刻才爆炸 — 相信不少人都踩過這個坑。合約測試就是為了解決這個問題。
 
 ### 三者的關係：Design by Contract、Contract Test、Spring Cloud Contract
 
@@ -467,9 +459,8 @@ Spring Cloud Contract
 
 ### 5.1 Design by Contract（契約式設計）
 
-**本質**：一種**軟體設計原則**，源自 Bertrand Meyer 在 1986 年設計的 Eiffel 程式語言。
+這是一種**軟體設計原則**，源自 Bertrand Meyer 在 1986 年設計的 Eiffel 程式語言。核心概念是為每個方法定義明確的「契約」：
 
-**核心概念**：
 - **前置條件（Precondition）**：呼叫方法前必須滿足的條件
 - **後置條件（Postcondition）**：方法執行完成後保證的結果
 - **不變量（Invariant）**：物件在其生命週期內始終為真的條件
@@ -502,7 +493,7 @@ public class UserService {
 
 ### 5.2 Contract Test（合約測試）
 
-**本質**：一種**測試策略**，用於微服務架構中驗證服務之間的 API 契約。
+這是一種**測試策略**，專門用來驗證微服務之間的 API 契約是否相容。
 
 **問題場景**：
 
@@ -525,7 +516,7 @@ Service A (Consumer)  ←── HTTP ──→  Service B (Producer)
 
 ### 5.3 Spring Cloud Contract
 
-**本質**：Contract Test 策略的**具體實作框架**。
+這是 Contract Test 策略的**具體實作框架**，也是 Spring 生態系中的官方解決方案。
 
 #### 工作流程
 
@@ -670,7 +661,7 @@ class UserClientContractTest {
 }
 ```
 
-### 5.4 實作建議
+### 5.4 什麼時候該導入合約測試？
 
 | 情境 | 建議 |
 |------|------|
@@ -688,6 +679,8 @@ class UserClientContractTest {
 ---
 
 ## 6. Spring Boot Test 切片測試完整對照表
+
+最後，附上一張完整的切片測試對照表，方便大家快速查閱：
 
 | 註解 | 測試對象 | 載入的 Bean | 典型用途 |
 |------|---------|------------|---------|
@@ -740,3 +733,7 @@ src/test/java/com/example/testing/
 └── testcontainers/
     └── UserPostgresIntegrationTest.java ← Testcontainers (Docker 整合測試)
 ```
+
+---
+
+如果你也在做微服務測試，歡迎留言分享你的經驗和做法。有任何問題也歡迎討論！
