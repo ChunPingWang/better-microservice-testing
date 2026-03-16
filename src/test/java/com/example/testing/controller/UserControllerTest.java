@@ -2,7 +2,6 @@ package com.example.testing.controller;
 
 import com.example.testing.dto.UserDto;
 import com.example.testing.entity.User;
-import com.example.testing.exception.GlobalExceptionHandler;
 import com.example.testing.exception.UserNotFoundException;
 import com.example.testing.service.UserService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -49,6 +48,8 @@ class UserControllerTest {
     @MockitoBean
     private UserService userService;
 
+    // ---- 查詢測試 ----
+
     @Test
     @DisplayName("GET /api/users - 應回傳所有使用者 (200)")
     void getAllUsers_shouldReturnList() throws Exception {
@@ -88,6 +89,8 @@ class UserControllerTest {
                 .andExpect(jsonPath("$.error").value("User not found with id: 99"));
     }
 
+    // ---- 建立測試 ----
+
     @Test
     @DisplayName("POST /api/users - 有效資料應建立使用者 (201)")
     void createUser_withValidData_shouldReturn201() throws Exception {
@@ -105,17 +108,38 @@ class UserControllerTest {
     }
 
     @Test
-    @DisplayName("POST /api/users - 無效資料應回傳 400 (Validation)")
-    void createUser_withInvalidData_shouldReturn400() throws Exception {
-        UserDto dto = new UserDto("", "not-an-email");
+    @DisplayName("POST /api/users - 名字為空應回傳 400")
+    void createUser_withBlankName_shouldReturn400() throws Exception {
+        UserDto dto = new UserDto("", "alice@example.com");
 
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(dto)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.name").exists())
+                .andExpect(jsonPath("$.name").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/users - Email 格式錯誤應回傳 400")
+    void createUser_withInvalidEmail_shouldReturn400() throws Exception {
+        UserDto dto = new UserDto("Alice", "not-an-email");
+
+        mockMvc.perform(post("/api/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(dto)))
+                .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.email").exists());
     }
+
+    @Test
+    @DisplayName("POST /api/users - 缺少 Content-Type 應回傳 415")
+    void createUser_withoutContentType_shouldReturn415() throws Exception {
+        mockMvc.perform(post("/api/users")
+                        .content("{\"name\":\"Alice\",\"email\":\"alice@example.com\"}"))
+                .andExpect(status().isUnsupportedMediaType());
+    }
+
+    // ---- 更新測試 ----
 
     @Test
     @DisplayName("PUT /api/users/{id} - 應更新使用者 (200)")
@@ -131,6 +155,8 @@ class UserControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.name", is("Alice Updated")));
     }
+
+    // ---- 刪除測試 ----
 
     @Test
     @DisplayName("DELETE /api/users/{id} - 應回傳 204")

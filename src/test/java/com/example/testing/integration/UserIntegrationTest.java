@@ -103,4 +103,30 @@ class UserIntegrationTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
     }
+
+    @Test
+    @DisplayName("建立多筆使用者後查詢列表")
+    void createMultipleUsers_shouldReturnAll() {
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Alice", "alice@example.com"), User.class);
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Bob", "bob@example.com"), User.class);
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Charlie", "charlie@example.com"), User.class);
+
+        ResponseEntity<List<User>> response = restTemplate.exchange(
+                "/api/users", HttpMethod.GET, null,
+                new ParameterizedTypeReference<>() {});
+
+        assertThat(response.getBody()).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("查詢不存在的使用者應回傳 404")
+    void getUserById_whenNotExists_shouldReturn404() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/users/99999", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
 }

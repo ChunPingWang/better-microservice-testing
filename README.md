@@ -1,36 +1,259 @@
-# Spring Boot Testing Guide — 從測試角度學習 Spring Boot
+# 微服務開發中，最困難的其實是測試
 
-> **本專案翻轉學習順序：先理解「怎麼測」，再理解「怎麼寫」。**
->
-> 大多數教學從 Entity → Repository → Service → Controller 由下而上教，但初學者常常不知道為什麼要這樣分層。
-> 本專案從測試的角度出發——每一層的存在，都是因為它能被獨立測試、獨立驗證。當你理解「這一層該怎麼測」，你就真正理解了「這一層為什麼存在」。
+微服務開發中，我覺得最困難的就是測試。
 
-## 目錄
+試想，在這麼多服務與 API 的交互作用下，每增加一個微服務，測試的難度可能是以指數級方式成長。回首過去與現在，很多人還是習慣啟動服務，再用 Swagger 執行測試。系統複雜度不高、微服務與 API 數量不多時，這樣做問題不大。但大規模開發時，這樣做是最佳解嗎？更不要說，加上容器與 K8s 所產生的額外負擔。
 
-- [1. Swagger 手動測試 vs Spring Boot Test 自動化測試](#1-swagger-手動測試-vs-spring-boot-test-自動化測試)
-- [2. 測試金字塔](#2-測試金字塔)
-- [3. 各類測試詳解](#3-各類測試詳解)
-  - [3.1 Unit Test（單元測試）](#31-unit-test單元測試)
-  - [3.2 @WebMvcTest（Controller 切片測試）](#32-webmvctestcontroller-切片測試)
-  - [3.3 @DataJpaTest（Repository 切片測試）](#33-datajpatestrepository-切片測試)
-  - [3.4 @JsonTest（JSON 序列化測試）](#34-jsontestjson-序列化測試)
-  - [3.5 @RestClientTest（REST Client 測試）](#35-restclienttestrest-client-測試)
-  - [3.6 @SpringBootTest（整合測試）](#36-springboottestintegration-整合測試)
-- [4. Testcontainers 整合](#4-testcontainers-整合)
-- [5. 合約測試（Contract Testing）](#5-合約測試contract-testing)
-- [6. Spring Boot Test 切片測試完整對照表](#6-spring-boot-test-切片測試完整對照表)
-- [7. 如何執行測試](#7-如何執行測試)
-- [8. 從測試看分層：為什麼要分 Controller / Service / Repository？](#8-從測試看分層為什麼要分-controller--service--repository)
-- [9. Test Doubles 全解析：Mock、Stub、Spy、Fake](#9-test-doubles-全解析mockstubspyfake)
-- [10. Arrange-Act-Assert 與好測試的原則](#10-arrange-act-assert-與好測試的原則)
-- [11. 什麼時候該 Mock？什麼時候不該？](#11-什麼時候該-mock什麼時候不該)
-- [12. TDD 實戰示範：先寫測試再寫實作](#12-tdd-實戰示範先寫測試再寫實作)
+如果你是用 Spring Boot 開發微服務，**強烈推薦深入研究 Spring Boot Test**，因為 Spring 開發團隊早就為你準備好測試所需要的一切。
+
+在這裡，我整理了一些微服務測試所需要的案例與方法，提供大家參考。
 
 ---
 
-## 1. Swagger 手動測試 vs Spring Boot Test 自動化測試
+## 目錄
 
-許多團隊習慣使用 **Swagger UI** 手動測試 API，這在開發初期方便快速驗證，但存在明顯的限制。Spring Boot Test 提供了更高效、更可靠的測試方式。
+- [1. 軟體測試基礎觀念](#1-軟體測試基礎觀念)
+  - [1.1 為什麼要寫測試？](#11-為什麼要寫測試)
+  - [1.2 Test Double（測試替身）](#12-test-double測試替身)
+  - [1.3 測試分層與測試金字塔](#13-測試分層與測試金字塔)
+  - [1.4 TDD（測試驅動開發）](#14-tdd測試驅動開發)
+- [2. Swagger 手動測試 vs Spring Boot Test 自動化測試](#2-swagger-手動測試-vs-spring-boot-test-自動化測試)
+- [3. Spring Boot Test 切片測試總覽](#3-spring-boot-test-切片測試總覽)
+- [4. 各類測試詳解與範例](#4-各類測試詳解與範例)
+  - [4.1 Unit Test（單元測試）](#41-unit-test單元測試)
+  - [4.2 @WebMvcTest（Controller 切片測試）](#42-webmvctestcontroller-切片測試)
+  - [4.3 @DataJpaTest（Repository 切片測試）](#43-datajpatestrepository-切片測試)
+  - [4.4 @JsonTest（JSON 序列化測試）](#44-jsontestjson-序列化測試)
+  - [4.5 @RestClientTest（REST Client 測試）](#45-restclienttestrest-client-測試)
+  - [4.6 @SpringBootTest（整合測試）](#46-springboottestintegration-整合測試)
+- [5. Testcontainers 整合](#5-testcontainers-整合)
+- [6. 合約測試（Contract Testing）](#6-合約測試contract-testing)
+- [7. 如何執行測試](#7-如何執行測試)
+
+---
+
+## 1. 軟體測試基礎觀念
+
+在進入 Spring Boot Test 的具體用法之前，我想先聊一些測試的基礎觀念。這些觀念不限於 Spring Boot，而是適用於所有軟體開發的通用知識。理解了這些，後面在看各種測試註解時，會更清楚「為什麼要這樣設計」。
+
+### 1.1 為什麼要寫測試？
+
+很多人覺得寫測試是「額外的工作」，但事實上，**不寫測試才是在給未來的自己埋雷**。
+
+- **信心**：改了一行程式碼，跑一次測試就知道有沒有弄壞其他東西
+- **文件**：好的測試本身就是最好的文件，告訴你這個方法「預期」的行為是什麼
+- **設計**：難以測試的程式碼，通常也是設計不好的程式碼。寫測試會迫使你寫出更鬆耦合的設計
+- **速度**：自動化測試跑一秒，手動測試可能要花好幾分鐘。在微服務架構下，這個差距會被放大幾十倍
+
+### 1.2 Test Double（測試替身）
+
+在測試中，我們經常需要「替換」真實的依賴。這些替代品統稱為 **Test Double**，概念來自 Gerard Meszaros 的《xUnit Test Patterns》。就像電影中的替身演員，Test Double 在測試中「替代」真實的物件。
+
+```
+                    Test Double（測試替身）
+                            │
+          ┌─────────┬───────┼───────┬──────────┐
+          ▼         ▼       ▼       ▼          ▼
+       Dummy      Stub    Spy    Mock        Fake
+       佔位用    回傳固定值  記錄呼叫  驗證互動   簡化實作
+```
+
+| 類型 | 用途 | 說明 | 範例 |
+|------|------|------|------|
+| **Dummy** | 佔位 | 只是填滿參數列表，不會真的被使用 | 傳入一個不會被呼叫的 Logger |
+| **Stub** | 提供固定回應 | 對特定呼叫回傳預設值，不驗證行為 | `when(repo.findById(1L)).thenReturn(user)` |
+| **Spy** | 記錄互動 | 包裝真實物件，記錄呼叫情況，可選擇性覆寫方法 | `@Spy` + `verify()` |
+| **Mock** | 驗證互動 | 完全模擬的物件，驗證方法是否被正確呼叫 | `@Mock` + `verify(repo).save(any())` |
+| **Fake** | 簡化實作 | 有實際行為但走捷徑的實作 | H2 記憶體資料庫取代 PostgreSQL |
+
+#### 在 Mockito 中的對應
+
+```java
+// Dummy — 只是佔位，測試中不會真正使用它
+UserRepository dummyRepo = mock(UserRepository.class);
+new SomeOtherService(dummyRepo);  // 只是需要一個參數填入
+
+// Stub — 設定固定回傳值
+@Mock UserRepository stubRepo;
+when(stubRepo.findById(1L)).thenReturn(Optional.of(user));  // 固定回傳 user
+when(stubRepo.existsByEmail("test@example.com")).thenReturn(true);
+
+// Mock — 驗證互動行為
+@Mock UserRepository mockRepo;
+userService.delete(1L);
+verify(mockRepo).delete(any(User.class));         // 驗證 delete 被呼叫了
+verify(mockRepo, never()).save(any());             // 驗證 save 沒有被呼叫
+verify(mockRepo, times(1)).findById(1L);           // 驗證 findById 被呼叫了 1 次
+
+// Spy — 包裝真實物件，部分覆寫
+@Spy UserService spyService = new UserService(realRepo);
+doReturn(user).when(spyService).findById(1L);      // 覆寫 findById，其他方法走真實邏輯
+
+// Fake — 簡化的真實實作
+// H2 記憶體資料庫就是一個 Fake，它是真的資料庫，但比 PostgreSQL 輕量
+// @DataJpaTest 預設就是用 H2 作為 Fake Database
+```
+
+#### Stub vs Mock：什麼時候用哪個？
+
+這是最常被問到的問題。簡單來說：
+
+- **Stub**：你關心的是「回傳值」— 給定輸入 X，應該回傳 Y
+- **Mock**：你關心的是「互動」— 某個方法應該被呼叫（或不該被呼叫）
+
+```java
+// Stub 用法：我只關心 findById 回傳什麼
+when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+User result = userService.findById(1L);
+assertThat(result.getName()).isEqualTo("Alice");  // 驗證回傳值
+
+// Mock 用法：我關心 delete 是否真的被執行了
+userService.delete(1L);
+verify(userRepository).delete(user);  // 驗證互動
+```
+
+> **實務建議**：在 Mockito 中，`@Mock` 註解同時支援 Stub 和 Mock 行為。大多數情況下你會混合使用 — 先 Stub（`when...thenReturn`），再 Mock（`verify`）。不需要刻意區分，但理解概念有助於你寫出更好的測試。
+
+### 1.3 測試分層與測試金字塔
+
+測試金字塔是 Mike Cohn 在 2009 年提出的概念。核心思想很簡單：**底層的測試寫得越多、跑得越快；頂層的測試只挑關鍵流程來寫。**
+
+```
+              ╱╲
+             ╱  ╲
+            ╱ E2E╲          ← 端到端測試 (少量，速度慢)
+           ╱──────╲           驗證完整業務流程
+          ╱        ╲
+         ╱  Slice   ╲       ← 切片測試 / 整合測試 (適量)
+        ╱   Tests    ╲        驗證元件之間的協作
+       ╱──────────────╲
+      ╱                ╲
+     ╱   Unit Tests     ╲   ← 單元測試 (大量，速度快)
+    ╱                    ╲     驗證單一類別的邏輯
+   ╱──────────────────────╲
+```
+
+| 層級 | 對應 Spring Boot | 數量 | 速度 | 測試範圍 |
+|------|-----------------|------|------|---------|
+| **Unit Test** | Mockito + JUnit 5 | 最多 | < 1 秒 | 單一類別的業務邏輯 |
+| **Slice Test** | @WebMvcTest, @DataJpaTest, @JsonTest 等 | 適量 | 1-3 秒 | 特定技術層 |
+| **Integration Test** | @SpringBootTest | 少量 | 5-15 秒 | 完整應用流程 |
+| **E2E Test** | @SpringBootTest + Testcontainers | 最少 | 10-30 秒 | 含真實基礎設施 |
+
+**為什麼是金字塔形？**
+
+越往上的測試，環境越複雜、速度越慢、除錯也越困難。如果大部分邏輯已經被底層的 Unit Test 驗證過了，上層的整合測試只需要驗證「各層串起來有沒有問題」即可。
+
+### 1.4 TDD（測試驅動開發）
+
+TDD（Test-Driven Development）是由 Kent Beck 在 2003 年正式提出的開發方法論。核心流程是著名的 **Red-Green-Refactor** 三步循環：
+
+```
+    ┌───────────────────────────────────────┐
+    │                                       │
+    ▼                                       │
+  🔴 Red                                    │
+  寫一個失敗的測試                            │
+    │                                       │
+    ▼                                       │
+  🟢 Green                                  │
+  用最簡單的方式讓測試通過                     │
+    │                                       │
+    ▼                                       │
+  🔵 Refactor                               │
+  重構程式碼，保持測試通過                     │
+    │                                       │
+    └───────────────────────────────────────┘
+```
+
+#### TDD 實戰範例：開發 UserService.create()
+
+讓我們用 TDD 的方式來開發一個「建立使用者」的功能。
+
+**Step 1 — Red：先寫失敗的測試**
+
+```java
+@ExtendWith(MockitoExtension.class)
+class UserServiceTest {
+
+    @Mock
+    private UserRepository userRepository;
+
+    @InjectMocks
+    private UserService userService;
+
+    @Test
+    void create_shouldSaveAndReturnUserWithId() {
+        // Arrange
+        UserDto dto = new UserDto("Alice", "alice@example.com");
+        User savedUser = new User("Alice", "alice@example.com");
+        savedUser.setId(1L);
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+
+        // Act
+        User result = userService.create(dto);
+
+        // Assert
+        assertThat(result.getId()).isNotNull();
+        assertThat(result.getName()).isEqualTo("Alice");
+        verify(userRepository).save(any(User.class));
+    }
+}
+```
+
+此時 `UserService.create()` 還不存在，編譯都不會過 — 這就是 Red。
+
+**Step 2 — Green：寫最少的程式碼讓測試通過**
+
+```java
+public User create(UserDto userDto) {
+    User user = new User(userDto.getName(), userDto.getEmail());
+    return userRepository.save(user);
+}
+```
+
+跑測試 — 通過了，這就是 Green。
+
+**Step 3 — Refactor：重構（如果需要）**
+
+目前程式碼已經很簡潔，不需要重構。但如果後來需要加上「email 不能重複」的業務規則，就再從 Red 開始：
+
+```java
+@Test
+void create_whenEmailAlreadyExists_shouldThrowException() {
+    UserDto dto = new UserDto("Alice", "alice@example.com");
+    when(userRepository.existsByEmail("alice@example.com")).thenReturn(true);
+
+    assertThatThrownBy(() -> userService.create(dto))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("already exists");
+}
+```
+
+#### TDD 的取捨
+
+TDD 不是銀彈。我的建議是：
+
+| 場景 | 是否適合 TDD |
+|------|------------|
+| 業務邏輯複雜、規則多 | 非常適合 — TDD 幫你釐清需求 |
+| CRUD 操作 | 不一定 — 邏輯太單純，TDD 反而拖慢速度 |
+| 探索性開發（不確定怎麼做） | 不適合 — 先寫 Spike 探索，穩定後再補測試 |
+| Bug 修復 | 非常適合 — 先寫測試重現 Bug，再修復 |
+
+> **務實的做法**：不需要 100% TDD。對於核心業務邏輯用 TDD，對於簡單的 CRUD 和膠水代碼（glue code），寫完再補測試也完全可以。重要的是**有測試**，而不是**什麼時候寫測試**。
+
+---
+
+## 2. Swagger 手動測試 vs Spring Boot Test 自動化測試
+
+理解了測試的基礎觀念後，我們來看一個實際場景。
+
+相信很多團隊都有這樣的經驗：開發完一個 API，第一件事就是打開 **Swagger UI**，手動輸入參數、按下 Execute，看回應是不是正確的。開發初期，這樣做直覺又快速，沒什麼問題。
+
+但隨著微服務數量增長，你會發現：**每次改一個 API，就得手動重測一輪相關的功能**。更麻煩的是，Swagger 測試必須先啟動整個應用程式，光是等待啟動就要花上好幾十秒。
+
+Spring Boot Test 提供了一個完全不同的思路。
 
 ### 核心差異：需不需要啟動整包程式？
 
@@ -47,7 +270,7 @@
 
 ### 為什麼 Spring Boot Test 可以不啟動整包程式？
 
-Spring Boot 提供了**切片測試（Slice Test）**機制，關鍵在於 **Application Context 的選擇性載入**：
+這是我覺得 Spring Boot Test 最厲害的地方 — **切片測試（Slice Test）**。它的關鍵在於 Application Context 的選擇性載入：
 
 ```
 Swagger 測試流程：
@@ -61,50 +284,48 @@ Swagger 測試流程：
 
 這就是為什麼 `@WebMvcTest` 只需 1-3 秒，而啟動整個應用需要 10-30 秒以上。
 
-### 結論
+### 小結
 
-> **Swagger 適合開發階段的快速 API 探索和文件產出**，但不能取代自動化測試。
+> **Swagger 適合開發階段的快速 API 探索和文件產出**，但它不能取代自動化測試。
 > **Spring Boot Test 才是保障程式品質和持續交付的正確方式。**
 >
 > 最佳實踐：兩者搭配使用 — Swagger 做 API 文件 + 互動式探索，Spring Boot Test 做自動化品質保障。
 
 ---
 
-## 2. 測試金字塔
+## 3. Spring Boot Test 切片測試總覽
 
-```
-              ╱╲
-             ╱  ╲
-            ╱ E2E╲          ← @SpringBootTest (少量)
-           ╱──────╲           端到端整合測試
-          ╱        ╲
-         ╱  Slice   ╲       ← @WebMvcTest, @DataJpaTest, @JsonTest (適量)
-        ╱   Tests    ╲        切片測試，針對特定層
-       ╱──────────────╲
-      ╱                ╲
-     ╱   Unit Tests     ╲   ← Mockito + JUnit 5 (大量)
-    ╱                    ╲     速度最快，數量最多
-   ╱──────────────────────╲
-```
+在深入各類測試的程式碼之前，先看一張全景圖。Spring Boot 針對不同的技術層，提供了對應的切片測試註解。每個註解只載入該層需要的 Bean，避免啟動整個應用。
 
-| 層級 | 測試方式 | 數量 | 速度 | 範圍 |
-|------|---------|------|------|------|
-| **Unit Test** | Mockito + JUnit 5 | 最多 | < 1 秒 | 單一類別 |
-| **Slice Test** | @WebMvcTest 等 | 適量 | 1-3 秒 | 特定層 |
-| **Integration Test** | @SpringBootTest | 最少 | 5-15 秒 | 完整應用 |
+| 註解 | 測試對象 | 載入的 Bean | 典型用途 |
+|------|---------|------------|---------|
+| `@WebMvcTest` | Controller | Controller, Filter, ControllerAdvice | REST API 路由與驗證 |
+| `@DataJpaTest` | Repository | Entity, Repository, EntityManager | JPA Query 測試 |
+| `@DataMongoTest` | MongoDB Repository | MongoTemplate, MongoRepository | MongoDB 操作測試 |
+| `@DataRedisTest` | Redis Repository | RedisTemplate | Redis 操作測試 |
+| `@JdbcTest` | JDBC | JdbcTemplate, DataSource | 原生 SQL 測試 |
+| `@JsonTest` | JSON 序列化 | ObjectMapper, JacksonTester | JSON 格式驗證 |
+| `@RestClientTest` | REST Client | RestTemplate/RestClient, MockRestServiceServer | 外部 API 呼叫 |
+| `@WebFluxTest` | WebFlux Controller | WebTestClient | Reactive 端點測試 |
+
+看到這張表，你就能理解為什麼切片測試這麼快了 — 它只載入你需要的那一塊。想測 Controller？用 `@WebMvcTest`，不會載入 Repository 和 Database。想測 Repository？用 `@DataJpaTest`，不會載入 Controller 和 Service。
+
+下面我們就來看每一種測試怎麼寫。
 
 ---
 
-## 3. 各類測試詳解
+## 4. 各類測試詳解與範例
 
-### 3.1 Unit Test（單元測試）
+接下來，我用一個簡單的 User CRUD 微服務，示範每一種測試怎麼寫。所有範例都可以在這個 repo 中直接執行。
 
-**目的**：測試單一類別的業務邏輯，完全隔離外部依賴。
+### 4.1 Unit Test（單元測試）
+
+這是最基本、也是你應該寫最多的測試。不啟動 Spring Context，速度最快，專注驗證單一類別的業務邏輯。
 
 **特點**：
-- 不啟動 Spring Context → 速度最快
-- 使用 `@Mock` 模擬依賴、`@InjectMocks` 注入被測對象
-- 專注驗證邏輯正確性
+- 使用 `@ExtendWith(MockitoExtension.class)` — 不需要 Spring
+- 使用 `@Mock` 建立測試替身，`@InjectMocks` 自動注入
+- 只測邏輯，不測框架
 
 **範例檔案**：[`src/test/java/.../unit/UserServiceTest.java`](src/test/java/com/example/testing/unit/UserServiceTest.java)
 
@@ -118,7 +339,29 @@ class UserServiceTest {
     @InjectMocks
     private UserService userService;
 
+    // ---- Stub 用法：驗證回傳值 ----
+
     @Test
+    @DisplayName("findAll - 應回傳所有使用者")
+    void findAll_shouldReturnAllUsers() {
+        // Arrange — 設定 Stub 行為
+        List<User> users = Arrays.asList(
+                new User("Alice", "alice@example.com"),
+                new User("Bob", "bob@example.com")
+        );
+        when(userRepository.findAll()).thenReturn(users);
+
+        // Act
+        List<User> result = userService.findAll();
+
+        // Assert
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getName()).isEqualTo("Alice");
+        verify(userRepository).findAll();
+    }
+
+    @Test
+    @DisplayName("findById - 存在時應回傳使用者")
     void findById_whenExists_shouldReturnUser() {
         User user = new User("Alice", "alice@example.com");
         user.setId(1L);
@@ -127,14 +370,77 @@ class UserServiceTest {
         User result = userService.findById(1L);
 
         assertThat(result.getName()).isEqualTo("Alice");
+        assertThat(result.getEmail()).isEqualTo("alice@example.com");
     }
 
     @Test
+    @DisplayName("findById - 不存在時應拋出 UserNotFoundException")
     void findById_whenNotExists_shouldThrowException() {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.findById(99L))
+                .isInstanceOf(UserNotFoundException.class)
+                .hasMessageContaining("99");
+    }
+
+    // ---- Mock 用法：驗證互動 ----
+
+    @Test
+    @DisplayName("create - 應成功建立使用者並呼叫 repository.save()")
+    void create_shouldSaveAndReturnUser() {
+        UserDto dto = new UserDto("Alice", "alice@example.com");
+        User savedUser = new User("Alice", "alice@example.com");
+        savedUser.setId(1L);
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+
+        User result = userService.create(dto);
+
+        assertThat(result.getId()).isEqualTo(1L);
+        assertThat(result.getName()).isEqualTo("Alice");
+        verify(userRepository).save(any(User.class));  // 驗證 save 確實被呼叫
+    }
+
+    @Test
+    @DisplayName("update - 應更新使用者資料")
+    void update_shouldModifyAndSaveUser() {
+        User existingUser = new User("Alice", "alice@example.com");
+        existingUser.setId(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+
+        User updatedUser = new User("Alice Updated", "alice.new@example.com");
+        updatedUser.setId(1L);
+        when(userRepository.save(any(User.class))).thenReturn(updatedUser);
+
+        UserDto updateDto = new UserDto("Alice Updated", "alice.new@example.com");
+        User result = userService.update(1L, updateDto);
+
+        assertThat(result.getName()).isEqualTo("Alice Updated");
+        verify(userRepository).findById(1L);           // 驗證先查詢
+        verify(userRepository).save(any(User.class));   // 驗證再儲存
+    }
+
+    @Test
+    @DisplayName("delete - 存在時應成功刪除")
+    void delete_whenExists_shouldDelete() {
+        User user = new User("Alice", "alice@example.com");
+        user.setId(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.delete(1L);
+
+        verify(userRepository).delete(user);            // 驗證 delete 被呼叫
+        verify(userRepository, never()).save(any());    // 驗證 save 沒有被呼叫
+    }
+
+    @Test
+    @DisplayName("delete - 不存在時應拋出例外")
+    void delete_whenNotExists_shouldThrowException() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.delete(99L))
                 .isInstanceOf(UserNotFoundException.class);
+
+        verify(userRepository, never()).delete(any());  // 驗證 delete 沒有被呼叫
     }
 }
 ```
@@ -143,14 +449,14 @@ class UserServiceTest {
 
 ---
 
-### 3.2 @WebMvcTest（Controller 切片測試）
+### 4.2 @WebMvcTest（Controller 切片測試）
 
-**目的**：測試 Controller 層的路由、HTTP 狀態碼、請求/回應格式、參數驗證。
+當你只想測 Controller 的路由、HTTP 狀態碼、請求驗證，而不想等整個應用啟動時，`@WebMvcTest` 就是你的好朋友。它只載入 Web 層的 Bean，**不啟動 Tomcat**。
 
 **特點**：
 - 只載入 Web 層 Bean（Controller, ControllerAdvice, Filter）
-- **不啟動 Tomcat**，使用 MockMvc 模擬 HTTP 請求
-- Service 層用 `@MockitoBean` 替代（Spring Boot 3.4+ 取代了舊版 `@MockBean`）
+- Service 層用 `@MockBean` 替代
+- 使用 `MockMvc` 模擬 HTTP 請求
 
 **範例檔案**：[`src/test/java/.../controller/UserControllerTest.java`](src/test/java/com/example/testing/controller/UserControllerTest.java)
 
@@ -161,28 +467,127 @@ class UserControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockitoBean
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @MockBean
     private UserService userService;
 
+    // ---- 查詢測試 ----
+
     @Test
+    @DisplayName("GET /api/users - 應回傳所有使用者 (200)")
+    void getAllUsers_shouldReturnList() throws Exception {
+        User user1 = new User("Alice", "alice@example.com");
+        user1.setId(1L);
+        User user2 = new User("Bob", "bob@example.com");
+        user2.setId(2L);
+        when(userService.findAll()).thenReturn(Arrays.asList(user1, user2));
+
+        mockMvc.perform(get("/api/users"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[0].name", is("Alice")))
+                .andExpect(jsonPath("$[1].name", is("Bob")));
+    }
+
+    @Test
+    @DisplayName("GET /api/users/{id} - 存在時應回傳使用者 (200)")
+    void getUserById_whenExists_shouldReturnUser() throws Exception {
+        User user = new User("Alice", "alice@example.com");
+        user.setId(1L);
+        when(userService.findById(1L)).thenReturn(user);
+
+        mockMvc.perform(get("/api/users/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name", is("Alice")))
+                .andExpect(jsonPath("$.email", is("alice@example.com")));
+    }
+
+    @Test
+    @DisplayName("GET /api/users/{id} - 不存在時應回傳 404")
+    void getUserById_whenNotExists_shouldReturn404() throws Exception {
+        when(userService.findById(99L)).thenThrow(new UserNotFoundException(99L));
+
+        mockMvc.perform(get("/api/users/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("User not found with id: 99"));
+    }
+
+    // ---- 建立測試 ----
+
+    @Test
+    @DisplayName("POST /api/users - 有效資料應建立使用者 (201)")
     void createUser_withValidData_shouldReturn201() throws Exception {
+        UserDto dto = new UserDto("Alice", "alice@example.com");
         User created = new User("Alice", "alice@example.com");
         created.setId(1L);
-        when(userService.create(any())).thenReturn(created);
+        when(userService.create(any(UserDto.class))).thenReturn(created);
 
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Alice\",\"email\":\"alice@example.com\"}"))
+                        .content(objectMapper.writeValueAsString(dto)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id", is(1)))
                 .andExpect(jsonPath("$.name", is("Alice")));
     }
 
     @Test
-    void createUser_withInvalidData_shouldReturn400() throws Exception {
+    @DisplayName("POST /api/users - 名字為空應回傳 400")
+    void createUser_withBlankName_shouldReturn400() throws Exception {
+        UserDto dto = new UserDto("", "alice@example.com");
+
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"\",\"email\":\"not-an-email\"}"))
-                .andExpect(status().isBadRequest());
+                        .content(objectMapper.writeValueAsString(dto)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.name").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/users - Email 格式錯誤應回傳 400")
+    void createUser_withInvalidEmail_shouldReturn400() throws Exception {
+        UserDto dto = new UserDto("Alice", "not-an-email");
+
+        mockMvc.perform(post("/api/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(dto)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.email").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/users - 缺少 Content-Type 應回傳 415")
+    void createUser_withoutContentType_shouldReturn415() throws Exception {
+        mockMvc.perform(post("/api/users")
+                        .content("{\"name\":\"Alice\",\"email\":\"alice@example.com\"}"))
+                .andExpect(status().isUnsupportedMediaType());
+    }
+
+    // ---- 更新測試 ----
+
+    @Test
+    @DisplayName("PUT /api/users/{id} - 應更新使用者 (200)")
+    void updateUser_shouldReturnUpdatedUser() throws Exception {
+        UserDto dto = new UserDto("Alice Updated", "alice.new@example.com");
+        User updated = new User("Alice Updated", "alice.new@example.com");
+        updated.setId(1L);
+        when(userService.update(eq(1L), any(UserDto.class))).thenReturn(updated);
+
+        mockMvc.perform(put("/api/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(dto)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name", is("Alice Updated")));
+    }
+
+    // ---- 刪除測試 ----
+
+    @Test
+    @DisplayName("DELETE /api/users/{id} - 應回傳 204")
+    void deleteUser_shouldReturn204() throws Exception {
+        mockMvc.perform(delete("/api/users/1"))
+                .andExpect(status().isNoContent());
     }
 }
 ```
@@ -191,9 +596,9 @@ class UserControllerTest {
 
 ---
 
-### 3.3 @DataJpaTest（Repository 切片測試）
+### 4.3 @DataJpaTest（Repository 切片測試）
 
-**目的**：測試 JPA Repository 的 Query Method、自定義查詢。
+想驗證你的 Repository Query Method 是否正確？`@DataJpaTest` 只載入 JPA 相關的 Bean，搭配 H2 記憶體資料庫（這就是一個 Fake），每個測試結束後自動 Rollback，乾淨又快速。
 
 **特點**：
 - 只載入 JPA 相關 Bean（Entity, Repository, EntityManager）
@@ -213,25 +618,115 @@ class UserRepositoryTest {
     @Autowired
     private UserRepository userRepository;
 
-    @Test
-    void findByEmail_whenExists_shouldReturnUser() {
-        entityManager.persistAndFlush(new User("Alice", "alice@example.com"));
+    // ---- 自定義查詢方法測試 ----
 
+    @Test
+    @DisplayName("findByEmail - 存在時應回傳使用者")
+    void findByEmail_whenExists_shouldReturnUser() {
+        // Arrange - 使用 TestEntityManager 插入測試資料
+        User user = new User("Alice", "alice@example.com");
+        entityManager.persistAndFlush(user);
+
+        // Act
         Optional<User> found = userRepository.findByEmail("alice@example.com");
 
+        // Assert
         assertThat(found).isPresent();
         assertThat(found.get().getName()).isEqualTo("Alice");
+    }
+
+    @Test
+    @DisplayName("findByEmail - 不存在時應回傳 empty")
+    void findByEmail_whenNotExists_shouldReturnEmpty() {
+        Optional<User> found = userRepository.findByEmail("nonexistent@example.com");
+
+        assertThat(found).isEmpty();
+    }
+
+    @Test
+    @DisplayName("existsByEmail - 存在時應回傳 true")
+    void existsByEmail_whenExists_shouldReturnTrue() {
+        User user = new User("Bob", "bob@example.com");
+        entityManager.persistAndFlush(user);
+
+        boolean exists = userRepository.existsByEmail("bob@example.com");
+
+        assertThat(exists).isTrue();
+    }
+
+    @Test
+    @DisplayName("existsByEmail - 不存在時應回傳 false")
+    void existsByEmail_whenNotExists_shouldReturnFalse() {
+        boolean exists = userRepository.existsByEmail("nobody@example.com");
+
+        assertThat(exists).isFalse();
+    }
+
+    // ---- CRUD 基本操作測試 ----
+
+    @Test
+    @DisplayName("save - 應成功儲存使用者並產生 ID")
+    void save_shouldPersistUserWithGeneratedId() {
+        User user = new User("Charlie", "charlie@example.com");
+
+        User saved = userRepository.save(user);
+
+        assertThat(saved.getId()).isNotNull();
+        assertThat(saved.getName()).isEqualTo("Charlie");
+
+        // 驗證確實寫入資料庫
+        User found = entityManager.find(User.class, saved.getId());
+        assertThat(found).isNotNull();
+        assertThat(found.getEmail()).isEqualTo("charlie@example.com");
+    }
+
+    @Test
+    @DisplayName("findAll - 應回傳所有使用者")
+    void findAll_shouldReturnAllUsers() {
+        entityManager.persistAndFlush(new User("Alice", "alice@example.com"));
+        entityManager.persistAndFlush(new User("Bob", "bob@example.com"));
+
+        var users = userRepository.findAll();
+
+        assertThat(users).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("delete - 刪除後應無法再查到")
+    void delete_shouldRemoveUser() {
+        User user = new User("Alice", "alice@example.com");
+        entityManager.persistAndFlush(user);
+        Long userId = user.getId();
+
+        userRepository.deleteById(userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(userRepository.findById(userId)).isEmpty();
+    }
+
+    // ---- 資料完整性測試 ----
+
+    @Test
+    @DisplayName("save - email 重複應拋出例外")
+    void save_withDuplicateEmail_shouldThrowException() {
+        entityManager.persistAndFlush(new User("Alice", "same@example.com"));
+
+        assertThatThrownBy(() -> {
+            userRepository.save(new User("Bob", "same@example.com"));
+            entityManager.flush();  // 強制寫入才會觸發 unique constraint
+        }).isInstanceOf(Exception.class);
     }
 }
 ```
 
-**適用場景**：Repository Method 驗證、Custom Query（@Query）測試、Entity Mapping 驗證
+**適用場景**：Repository Method 驗證、Custom Query（@Query）測試、Entity Mapping 驗證、資料完整性驗證
 
 ---
 
-### 3.4 @JsonTest（JSON 序列化測試）
+### 4.4 @JsonTest（JSON 序列化測試）
 
-**目的**：測試 DTO / Value Object 的 JSON 序列化與反序列化。
+在微服務之間，JSON 是最常見的資料交換格式。如果序列化/反序列化出了問題，debug 起來往往很痛苦。`@JsonTest` 讓你可以單獨驗證 DTO 的 JSON 行為，不需要啟動 Web 層或資料庫。
 
 **特點**：
 - 只載入 JSON 相關 Bean（ObjectMapper, JacksonTester）
@@ -247,33 +742,90 @@ class UserDtoJsonTest {
     @Autowired
     private JacksonTester<UserDto> json;
 
+    // ---- 序列化測試 ----
+
     @Test
+    @DisplayName("序列化 - UserDto 應正確轉為 JSON")
     void serialize_shouldProduceCorrectJson() throws Exception {
         UserDto dto = new UserDto("Alice", "alice@example.com");
 
         assertThat(json.write(dto))
                 .hasJsonPathStringValue("$.name")
                 .extractingJsonPathStringValue("$.name").isEqualTo("Alice");
+
+        assertThat(json.write(dto))
+                .hasJsonPathStringValue("$.email")
+                .extractingJsonPathStringValue("$.email").isEqualTo("alice@example.com");
     }
 
     @Test
+    @DisplayName("序列化 - 應只包含預期的欄位")
+    void serialize_shouldContainExpectedFieldsOnly() throws Exception {
+        UserDto dto = new UserDto("Bob", "bob@example.com");
+
+        String jsonString = json.write(dto).getJson();
+        assertThat(jsonString).contains("\"name\"");
+        assertThat(jsonString).contains("\"email\"");
+    }
+
+    // ---- 反序列化測試 ----
+
+    @Test
+    @DisplayName("反序列化 - JSON 應正確轉為 UserDto")
     void deserialize_shouldProduceCorrectObject() throws Exception {
-        String content = "{\"name\":\"Bob\",\"email\":\"bob@example.com\"}";
+        String content = """
+                {
+                    "name": "Bob",
+                    "email": "bob@example.com"
+                }
+                """;
 
         UserDto result = json.parseObject(content);
 
         assertThat(result.getName()).isEqualTo("Bob");
+        assertThat(result.getEmail()).isEqualTo("bob@example.com");
+    }
+
+    @Test
+    @DisplayName("反序列化 - 忽略未知欄位不應出錯")
+    void deserialize_withExtraFields_shouldIgnoreUnknown() throws Exception {
+        String content = """
+                {
+                    "name": "Charlie",
+                    "email": "charlie@example.com",
+                    "unknownField": "should be ignored"
+                }
+                """;
+
+        UserDto result = json.parseObject(content);
+
+        assertThat(result.getName()).isEqualTo("Charlie");
+        assertThat(result.getEmail()).isEqualTo("charlie@example.com");
+    }
+
+    // ---- Round-trip 測試 ----
+
+    @Test
+    @DisplayName("序列化後再反序列化 - 應保持一致")
+    void roundTrip_shouldMaintainConsistency() throws Exception {
+        UserDto original = new UserDto("Charlie", "charlie@example.com");
+
+        String jsonString = json.write(original).getJson();
+        UserDto restored = json.parseObject(jsonString);
+
+        assertThat(restored.getName()).isEqualTo(original.getName());
+        assertThat(restored.getEmail()).isEqualTo(original.getEmail());
     }
 }
 ```
 
-**適用場景**：API 回應格式驗證、複雜 JSON 結構測試、日期格式轉換
+**適用場景**：API 回應格式驗證、複雜 JSON 結構測試、日期格式轉換、`@JsonIgnore` / `@JsonProperty` 行為驗證
 
 ---
 
-### 3.5 @RestClientTest（REST Client 測試）
+### 4.5 @RestClientTest（REST Client 測試）
 
-**目的**：測試應用程式呼叫外部 API 的行為。
+微服務之間經常需要呼叫其他服務的 API。但測試時，你不可能要求所有外部服務都跑起來。`@RestClientTest` 搭配 `MockRestServiceServer`，讓你模擬外部 API 的回應，完全不需要真實的外部服務。
 
 **特點**：
 - 只載入指定的 Client 元件
@@ -293,27 +845,58 @@ class ExternalApiClientTest {
     private MockRestServiceServer mockServer;
 
     @Test
+    @DisplayName("fetchUser - 應正確解析外部 API 回應")
     void fetchUser_shouldParseResponse() {
+        String responseJson = """
+                {
+                    "name": "External User",
+                    "email": "external@example.com"
+                }
+                """;
+
         mockServer.expect(requestTo("https://api.example.com/users/123"))
-                .andRespond(withSuccess(
-                    "{\"name\":\"External User\",\"email\":\"ext@example.com\"}",
-                    MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(responseJson, MediaType.APPLICATION_JSON));
 
         UserDto result = externalApiClient.fetchUserFromExternalApi("123");
 
         assertThat(result.getName()).isEqualTo("External User");
+        assertThat(result.getEmail()).isEqualTo("external@example.com");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchUser - 外部 API 回傳 404 時應拋出例外")
+    void fetchUser_when404_shouldThrowException() {
+        mockServer.expect(requestTo("https://api.example.com/users/999"))
+                .andRespond(withResourceNotFound());
+
+        assertThatThrownBy(() -> externalApiClient.fetchUserFromExternalApi("999"))
+                .isInstanceOf(Exception.class);
+
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchUser - 外部 API 回傳 500 時應拋出例外")
+    void fetchUser_when500_shouldThrowException() {
+        mockServer.expect(requestTo("https://api.example.com/users/123"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> externalApiClient.fetchUserFromExternalApi("123"))
+                .isInstanceOf(Exception.class);
+
         mockServer.verify();
     }
 }
 ```
 
-**適用場景**：第三方 API 呼叫測試、HTTP 錯誤處理、回應解析
+**適用場景**：第三方 API 呼叫測試、HTTP 錯誤處理、回應解析、超時行為驗證
 
 ---
 
-### 3.6 @SpringBootTest（Integration 整合測試）
+### 4.6 @SpringBootTest（Integration 整合測試）
 
-**目的**：端到端驗證完整的 Controller → Service → Repository 流程。
+當你需要端到端驗證完整的 Controller → Service → Repository 流程時，就用 `@SpringBootTest`。它會啟動完整的 Spring Context + 內嵌 Tomcat，最接近生產環境，但也是速度最慢的。所以建議只針對關鍵業務流程來寫。
 
 **特點**：
 - 啟動完整 Spring Context + 內嵌 Tomcat
@@ -330,17 +913,98 @@ class UserIntegrationTest {
     @Autowired
     private TestRestTemplate restTemplate;
 
-    @Test
-    void fullCrudFlow() {
-        // Create
-        UserDto dto = new UserDto("Alice", "alice@example.com");
-        ResponseEntity<User> response = restTemplate.postForEntity("/api/users", dto, User.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    @Autowired
+    private UserRepository userRepository;
 
-        // Read
-        Long id = response.getBody().getId();
-        ResponseEntity<User> getResponse = restTemplate.getForEntity("/api/users/" + id, User.class);
+    @BeforeEach
+    void setUp() {
+        userRepository.deleteAll();
+    }
+
+    @Test
+    @DisplayName("完整 CRUD 流程 — 建立、查詢、更新、刪除")
+    void fullCrudFlow() {
+        // 1. Create
+        UserDto createDto = new UserDto("Alice", "alice@example.com");
+        ResponseEntity<User> createResponse = restTemplate.postForEntity(
+                "/api/users", createDto, User.class);
+
+        assertThat(createResponse.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(createResponse.getBody()).isNotNull();
+        Long userId = createResponse.getBody().getId();
+        assertThat(userId).isNotNull();
+
+        // 2. Read (single)
+        ResponseEntity<User> getResponse = restTemplate.getForEntity(
+                "/api/users/" + userId, User.class);
+
+        assertThat(getResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(getResponse.getBody().getName()).isEqualTo("Alice");
+
+        // 3. Read (all)
+        ResponseEntity<List<User>> listResponse = restTemplate.exchange(
+                "/api/users", HttpMethod.GET, null,
+                new ParameterizedTypeReference<>() {});
+
+        assertThat(listResponse.getBody()).hasSize(1);
+
+        // 4. Update
+        UserDto updateDto = new UserDto("Alice Updated", "alice.updated@example.com");
+        ResponseEntity<User> updateResponse = restTemplate.exchange(
+                "/api/users/" + userId, HttpMethod.PUT,
+                new HttpEntity<>(updateDto), User.class);
+
+        assertThat(updateResponse.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(updateResponse.getBody().getName()).isEqualTo("Alice Updated");
+
+        // 5. Delete
+        ResponseEntity<Void> deleteResponse = restTemplate.exchange(
+                "/api/users/" + userId, HttpMethod.DELETE, null, Void.class);
+
+        assertThat(deleteResponse.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
+
+        // 6. Verify deleted
+        ResponseEntity<String> verifyResponse = restTemplate.getForEntity(
+                "/api/users/" + userId, String.class);
+
+        assertThat(verifyResponse.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("建立使用者 — 無效資料應回傳 400")
+    void createUser_withInvalidData_shouldReturn400() {
+        UserDto invalidDto = new UserDto("", "not-an-email");
+
+        ResponseEntity<String> response = restTemplate.postForEntity(
+                "/api/users", invalidDto, String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @DisplayName("建立多筆使用者後查詢列表")
+    void createMultipleUsers_shouldReturnAll() {
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Alice", "alice@example.com"), User.class);
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Bob", "bob@example.com"), User.class);
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Charlie", "charlie@example.com"), User.class);
+
+        ResponseEntity<List<User>> response = restTemplate.exchange(
+                "/api/users", HttpMethod.GET, null,
+                new ParameterizedTypeReference<>() {});
+
+        assertThat(response.getBody()).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("查詢不存在的使用者應回傳 404")
+    void getUserById_whenNotExists_shouldReturn404() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/users/99999", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 }
 ```
@@ -349,17 +1013,21 @@ class UserIntegrationTest {
 
 ---
 
-## 4. Testcontainers 整合
+## 5. Testcontainers 整合
 
-### 為什麼需要 Testcontainers？
+### 你踩過這個坑嗎？
 
-使用 H2 記憶體資料庫做測試雖然方便快速，但存在問題：
+用 H2 記憶體資料庫跑測試，全部綠燈通過。部署到生產環境連上 PostgreSQL，結果直接炸掉。
+
+這不是你的問題，是 H2 跟真實資料庫本來就有差異：
 
 | 問題 | 說明 |
 |------|------|
 | **SQL 方言差異** | H2 支援的 SQL 語法與 PostgreSQL/MySQL 不完全相同 |
 | **特定功能不支援** | JSON 型別、陣列型別、全文搜尋等功能在 H2 上行為不同 |
 | **False Positive** | 測試在 H2 上通過，但在生產 DB 上失敗 |
+
+還記得第一章提到的 Test Double 嗎？H2 就是一個 **Fake** — 它有真實的行為，但走的是捷徑。大部分情況下 Fake 夠用了，但當你需要驗證特定資料庫的行為時，就需要更真實的環境。
 
 **Testcontainers** 解決了這個問題 — 它透過 Docker 啟動真實的資料庫容器，讓測試環境與生產環境使用相同的資料庫。
 
@@ -416,19 +1084,47 @@ class UserPostgresIntegrationTest {
         registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
     }
 
+    @Autowired
+    private TestRestTemplate restTemplate;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @BeforeEach
+    void setUp() {
+        userRepository.deleteAll();
+    }
+
     @Test
     void createAndRetrieveUser_withRealPostgres() {
         // 這裡的操作全部跑在真實的 PostgreSQL 上！
         UserDto dto = new UserDto("Alice", "alice@example.com");
         ResponseEntity<User> response = restTemplate.postForEntity("/api/users", dto, User.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+
+        Long userId = response.getBody().getId();
+        ResponseEntity<User> getResponse = restTemplate.getForEntity("/api/users/" + userId, User.class);
+        assertThat(getResponse.getBody().getName()).isEqualTo("Alice");
+    }
+
+    @Test
+    void uniqueEmailConstraint_withRealPostgres() {
+        // 在真實的 PostgreSQL 上測試 unique constraint
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Alice", "same@example.com"), User.class);
+
+        // 第二次用相同 email 建立應該失敗
+        ResponseEntity<String> response = restTemplate.postForEntity("/api/users",
+                new UserDto("Bob", "same@example.com"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }
 ```
 
 ### Testcontainers 支援的服務
 
-除了 PostgreSQL，Testcontainers 還支援：
+除了 PostgreSQL，Testcontainers 還支援很多常見的基礎設施：
 
 | 服務 | Artifact | 用途 |
 |------|----------|------|
@@ -447,7 +1143,11 @@ class UserPostgresIntegrationTest {
 
 ---
 
-## 5. 合約測試（Contract Testing）
+## 6. 合約測試（Contract Testing）
+
+微服務架構中，還有一個常被忽略但極其重要的測試面向：**服務之間的 API 契約**。
+
+當 Service B 悄悄改了回應格式，Service A 完全不知道，直到上線那一刻才爆炸 — 相信不少人都踩過這個坑。合約測試就是為了解決這個問題。
 
 ### 三者的關係：Design by Contract、Contract Test、Spring Cloud Contract
 
@@ -473,11 +1173,10 @@ Spring Cloud Contract
      提供 DSL 定義契約、自動產生測試與 Stub
 ```
 
-### 5.1 Design by Contract（契約式設計）
+### 6.1 Design by Contract（契約式設計）
 
-**本質**：一種**軟體設計原則**，源自 Bertrand Meyer 在 1986 年設計的 Eiffel 程式語言。
+這是一種**軟體設計原則**，源自 Bertrand Meyer 在 1986 年設計的 Eiffel 程式語言。核心概念是為每個方法定義明確的「契約」：
 
-**核心概念**：
 - **前置條件（Precondition）**：呼叫方法前必須滿足的條件
 - **後置條件（Postcondition）**：方法執行完成後保證的結果
 - **不變量（Invariant）**：物件在其生命週期內始終為真的條件
@@ -508,9 +1207,9 @@ public class UserService {
 
 **重點**：DbC 是一種**設計思想**，不是測試框架。它影響了 Contract Test 的概念。
 
-### 5.2 Contract Test（合約測試）
+### 6.2 Contract Test（合約測試）
 
-**本質**：一種**測試策略**，用於微服務架構中驗證服務之間的 API 契約。
+這是一種**測試策略**，專門用來驗證微服務之間的 API 契約是否相容。
 
 **問題場景**：
 
@@ -531,9 +1230,9 @@ Service A (Consumer)  ←── HTTP ──→  Service B (Producer)
 4. Producer 改 API 時，契約測試先失敗 → 提前發現破壞性變更
 ```
 
-### 5.3 Spring Cloud Contract
+### 6.3 Spring Cloud Contract
 
-**本質**：Contract Test 策略的**具體實作框架**。
+這是 Contract Test 策略的**具體實作框架**，也是 Spring 生態系中的官方解決方案。
 
 #### 工作流程
 
@@ -627,7 +1326,7 @@ public abstract class BaseContractTest {
     @Autowired
     private UserController userController;
 
-    @MockitoBean
+    @MockBean
     private UserService userService;
 
     @BeforeEach
@@ -678,7 +1377,7 @@ class UserClientContractTest {
 }
 ```
 
-### 5.4 實作建議
+### 6.4 什麼時候該導入合約測試？
 
 | 情境 | 建議 |
 |------|------|
@@ -692,21 +1391,6 @@ class UserClientContractTest {
 2. Producer 端先加入 Contract Verifier
 3. 產生 Stub JAR 後，Consumer 端加入 Stub Runner
 4. 將契約檔案納入版本控制，作為 API 規格的 Single Source of Truth
-
----
-
-## 6. Spring Boot Test 切片測試完整對照表
-
-| 註解 | 測試對象 | 載入的 Bean | 典型用途 |
-|------|---------|------------|---------|
-| `@WebMvcTest` | Controller | Controller, Filter, ControllerAdvice | REST API 路由與驗證 |
-| `@DataJpaTest` | Repository | Entity, Repository, EntityManager | JPA Query 測試 |
-| `@DataMongoTest` | MongoDB Repository | MongoTemplate, MongoRepository | MongoDB 操作測試 |
-| `@DataRedisTest` | Redis Repository | RedisTemplate | Redis 操作測試 |
-| `@JdbcTest` | JDBC | JdbcTemplate, DataSource | 原生 SQL 測試 |
-| `@JsonTest` | JSON 序列化 | ObjectMapper, JacksonTester | JSON 格式驗證 |
-| `@RestClientTest` | REST Client | RestTemplate, MockRestServiceServer | 外部 API 呼叫 |
-| `@WebFluxTest` | WebFlux Controller | WebTestClient | Reactive 端點測試 |
 
 ---
 
@@ -734,8 +1418,7 @@ mvn test surefire-report:report
 ```
 src/test/java/com/example/testing/
 ├── unit/
-│   ├── UserServiceTest.java           ← Unit Test (Mockito) — 含 TDD 搜尋範例
-│   └── UserServiceSpyTest.java        ← Spy 測試範例 (Mock vs Spy 差異)
+│   └── UserServiceTest.java           ← Unit Test (Mockito)
 ├── controller/
 │   └── UserControllerTest.java        ← @WebMvcTest (切片測試)
 ├── repository/
@@ -752,522 +1435,4 @@ src/test/java/com/example/testing/
 
 ---
 
-## 8. 從測試看分層：為什麼要分 Controller / Service / Repository？
-
-> 初學者最常問的問題：「為什麼要分這麼多層？全部寫在 Controller 裡不行嗎？」
->
-> 答案是：**因為分層讓每一層都能被獨立測試。** 可測試性（Testability）是好架構的核心指標。
-
-### 傳統教學 vs 測試驅動思維
-
-```
-傳統學習路線（由下而上）：
-  Entity → Repository → Service → Controller → 最後才學測試
-  問題：學了半天不知道「分層到底有什麼好處」
-
-測試驅動學習路線（本專案）：
-  先看測試怎麼寫 → 理解每一層為什麼存在 → 再看實作
-  好處：每一層的職責因為「能被怎麼測」而變得清晰
-```
-
-### 每一層為什麼存在？用測試來回答
-
-| 層 | 為什麼獨立存在？ | 測試怎麼證明？ |
-|---|---|---|
-| **Controller** | 負責 HTTP 協議（路由、狀態碼、驗證） | `@WebMvcTest` 不需要 Service 和 DB 就能測試 HTTP 行為 |
-| **Service** | 負責業務邏輯（規則、計算、流程） | `@ExtendWith(MockitoExtension.class)` 不需要 Spring 就能測試邏輯 |
-| **Repository** | 負責資料存取（SQL、查詢方法） | `@DataJpaTest` 不需要 Controller 和 Service 就能測試 DB 操作 |
-| **DTO** | 負責資料傳輸格式（JSON 結構） | `@JsonTest` 不需要任何其他層就能測試 JSON 序列化 |
-| **Client** | 負責呼叫外部 API | `@RestClientTest` 不需要真實外部服務就能測試呼叫邏輯 |
-
-### 一句話總結
-
-> **如果你把所有邏輯放在同一層，你就無法單獨測試任何一件事。**
-> 分層的真正價值，不只是「程式碼整潔」，而是「每一層都能獨立驗證其正確性」。
-
-### 學習建議
-
-1. **先跑測試** — `mvn test`，看看 30 個測試如何全部通過
-2. **讀測試程式碼** — 從 `UserServiceTest` 開始，理解 Arrange-Act-Assert 模式
-3. **對照實作** — 看完測試後再看對應的 Service / Controller 實作
-4. **動手破壞** — 故意改壞一行程式碼，看哪個測試先失敗，理解測試的守護範圍
-5. **新增功能** — 試著加一個新的 API（例如搜尋功能），先寫測試再寫實作
-
----
-
-## 9. Test Doubles 全解析：Mock、Stub、Spy、Fake
-
-> 初學者常把 Mock、Stub、Spy 全部叫做「Mock」，但它們其實是不同的東西，用途也不同。
-> 理解差異後，你會更清楚「這個測試場景該用哪一種」。
-
-### 四種 Test Double 對照
-
-| 類型 | 一句話解釋 | Mockito 對應 | 什麼時候用？ |
-|------|-----------|-------------|------------|
-| **Stub** | 回傳固定答案的替身 | `when(...).thenReturn(...)` | 你只關心「回傳什麼」，不關心「有沒有被呼叫」 |
-| **Mock** | 會驗證互動的替身 | `verify(mock).method()` | 你需要確認「某個方法確實被呼叫了」 |
-| **Spy** | 包裝真實物件，可部分覆蓋 | `@Spy` + `doReturn(...).when(spy)` | 大部分用真實邏輯，只替換其中一個方法 |
-| **Fake** | 簡化版的真實實作 | 手動寫一個簡化類別 | 真實物件太重（如用 HashMap 取代 DB） |
-
-### 用程式碼說明差異
-
-```java
-// ===== Stub：只設定回傳值，不驗證互動 =====
-@Mock
-private UserRepository userRepository;
-
-@Test
-void stub_example() {
-    // 這是 Stub 行為：「當呼叫 findById 時，回傳這個值」
-    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-    User result = userService.findById(1L);
-
-    // 只驗證結果，不驗證 repository 是否被呼叫
-    assertThat(result.getName()).isEqualTo("Alice");
-}
-
-// ===== Mock：驗證互動（方法是否被呼叫） =====
-@Test
-void mock_example() {
-    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-    userService.delete(1L);
-
-    // 驗證 delete 確實呼叫了 repository.delete()
-    verify(userRepository).delete(user);
-    // 驗證沒有其他多餘的互動
-    verifyNoMoreInteractions(userRepository);
-}
-
-// ===== Spy：真實物件 + 部分覆蓋 =====
-@Spy
-private List<String> spyList = new ArrayList<>();
-
-@Test
-void spy_example() {
-    spyList.add("real");           // 真實呼叫，list 真的加了元素
-    assertThat(spyList).hasSize(1); // 真實結果
-
-    doReturn(100).when(spyList).size(); // 只覆蓋 size() 方法
-    assertThat(spyList.size()).isEqualTo(100); // 被覆蓋的結果
-    assertThat(spyList.get(0)).isEqualTo("real"); // 其他方法仍是真實的
-}
-
-// ===== Fake：手動簡化實作 =====
-// 不用 Mockito，自己寫一個簡化版 Repository
-class FakeUserRepository {
-    private Map<Long, User> store = new HashMap<>();
-    private Long idSeq = 1L;
-
-    public User save(User user) {
-        user.setId(idSeq++);
-        store.put(user.getId(), user);
-        return user;
-    }
-
-    public Optional<User> findById(Long id) {
-        return Optional.ofNullable(store.get(id));
-    }
-}
-```
-
-### Spy 的實際應用場景
-
-**範例檔案**：[`src/test/java/.../unit/UserServiceSpyTest.java`](src/test/java/com/example/testing/unit/UserServiceSpyTest.java)
-
-```java
-@ExtendWith(MockitoExtension.class)
-class UserServiceSpyTest {
-
-    @Mock
-    private UserRepository userRepository;
-
-    @Spy
-    @InjectMocks
-    private UserService userService;
-
-    @Test
-    void update_shouldCallFindByIdInternally() {
-        User existing = new User("Alice", "alice@example.com");
-        existing.setId(1L);
-        when(userRepository.findById(1L)).thenReturn(Optional.of(existing));
-        when(userRepository.save(any())).thenReturn(existing);
-
-        // Spy 讓我們驗證 update() 內部確實呼叫了 findById()
-        userService.update(1L, new UserDto("Updated", "updated@example.com"));
-
-        // 驗證內部方法呼叫鏈
-        verify(userService).findById(1L);
-        verify(userRepository).save(any(User.class));
-    }
-}
-```
-
-### 選擇指南
-
-```
-你需要什麼？
-  │
-  ├─ 只需要「回傳假資料」→ Stub（when().thenReturn()）
-  │
-  ├─ 需要「驗證某方法有沒有被呼叫」→ Mock（verify()）
-  │
-  ├─ 需要「用真實邏輯，但覆蓋其中一個方法」→ Spy（@Spy）
-  │
-  └─ 需要「完整的替代實作，但比真實物件輕量」→ Fake（手動實作）
-```
-
----
-
-## 10. Arrange-Act-Assert 與好測試的原則
-
-### 10.1 AAA 模式（Arrange-Act-Assert）
-
-每個測試方法都應該有清晰的三段結構：
-
-```java
-@Test
-void findById_whenExists_shouldReturnUser() {
-    // ===== Arrange（準備）=====
-    // 設定測試資料和前置條件
-    User user = new User("Alice", "alice@example.com");
-    user.setId(1L);
-    when(userRepository.findById(1L)).thenReturn(Optional.of(user));
-
-    // ===== Act（執行）=====
-    // 呼叫被測試的方法（通常只有一行）
-    User result = userService.findById(1L);
-
-    // ===== Assert（驗證）=====
-    // 檢查結果是否符合預期
-    assertThat(result.getName()).isEqualTo("Alice");
-    assertThat(result.getEmail()).isEqualTo("alice@example.com");
-}
-```
-
-**關鍵原則**：
-- **Arrange**：可以很長（準備複雜場景），沒問題
-- **Act**：通常只有 **一行**——就是你要測的那個方法呼叫
-- **Assert**：驗證結果，可以多個斷言，但都應該針對同一個行為的結果
-
-### 10.2 測試命名：讓測試名稱就是文件
-
-好的測試名稱 = **被測方法_場景_預期行為**
-
-```java
-// ✅ 好的命名：讀名稱就知道在測什麼
-void findById_whenExists_shouldReturnUser()
-void findById_whenNotExists_shouldThrowException()
-void create_withValidDto_shouldSaveAndReturnUser()
-void delete_whenUserNotFound_shouldThrowException()
-
-// ❌ 差的命名：不知道在測什麼
-void test1()
-void testFindById()
-void findByIdTest()
-void itWorks()
-```
-
-搭配 `@DisplayName` 提供中文描述，兩全其美：
-
-```java
-@Test
-@DisplayName("findById - 存在時應回傳使用者")
-void findById_whenExists_shouldReturnUser() { ... }
-```
-
-### 10.3 測試行為，不要測實作
-
-```java
-// ❌ 測試實作細節（脆弱：重構就壞）
-@Test
-void create_shouldCallRepositorySaveExactlyOnce() {
-    userService.create(dto);
-    verify(userRepository, times(1)).save(any());
-    // 問題：如果 Service 內部改成 saveAndFlush()，測試就壞了
-    // 但功能其實沒壞！
-}
-
-// ✅ 測試行為（穩固：重構不會壞）
-@Test
-void create_shouldReturnUserWithId() {
-    when(userRepository.save(any())).thenReturn(savedUser);
-
-    User result = userService.create(dto);
-
-    assertThat(result.getId()).isNotNull();
-    assertThat(result.getName()).isEqualTo("Alice");
-    // 只驗證「結果正確」，不管內部怎麼做到的
-}
-```
-
-### 10.4 好測試的 F.I.R.S.T 原則
-
-| 原則 | 說明 | 範例 |
-|------|------|------|
-| **F**ast（快速） | 單元測試應在毫秒內完成 | 不要在 Unit Test 裡連資料庫 |
-| **I**ndependent（獨立） | 測試之間不互相依賴 | 不要依賴其他測試的執行順序 |
-| **R**epeatable（可重複） | 每次執行結果一致 | 不要依賴外部 API、系統時間、隨機數 |
-| **S**elf-validating（自驗證） | 測試自動判斷 pass/fail | 不要靠 `System.out.println` 人眼驗證 |
-| **T**imely（及時） | 在寫產品程式碼時就寫測試 | 不要等上線前才補測試 |
-
-### 10.5 一個測試只測一件事
-
-```java
-// ❌ 一個測試做太多事
-@Test
-void testUserCrud() {
-    // 測建立
-    User created = userService.create(dto);
-    assertThat(created.getId()).isNotNull();
-    // 測查詢
-    User found = userService.findById(created.getId());
-    assertThat(found.getName()).isEqualTo("Alice");
-    // 測刪除
-    userService.delete(created.getId());
-    assertThatThrownBy(() -> userService.findById(created.getId()));
-    // 問題：如果失敗了，是哪一步出錯？
-}
-
-// ✅ 每個測試只驗證一個行為
-@Test void create_shouldReturnUserWithId() { ... }
-@Test void findById_whenExists_shouldReturnUser() { ... }
-@Test void delete_whenExists_shouldRemoveUser() { ... }
-```
-
-> **例外**：Integration Test（如 `UserIntegrationTest.fullCrudFlow()`）可以測完整流程，
-> 因為它的目的就是驗證「端到端流程是否正確」，這是有意的設計。
-
----
-
-## 11. 什麼時候該 Mock？什麼時候不該？
-
-> Mock 是強大的工具，但濫用 Mock 會讓測試變得脆弱且沒有意義。
-> 核心原則：**在邊界處 Mock，在邊界內用真實物件。**
-
-### 11.1 邊界原則
-
-```
-你的程式碼
-┌──────────────────────────────────┐
-│                                  │
-│   Service ──→ Repository ──→ DB  │ ← DB 是邊界，該 Mock
-│      │                           │
-│      └──→ ExternalApiClient ──→  │ ← 外部 API 是邊界，該 Mock
-│             外部 HTTP 服務        │
-│                                  │
-└──────────────────────────────────┘
-```
-
-### 11.2 該 Mock 的場景
-
-| 場景 | 為什麼要 Mock | 範例 |
-|------|-------------|------|
-| **資料庫存取** | Unit Test 不該依賴 DB | Mock `UserRepository` |
-| **外部 API 呼叫** | 不可控、不穩定、慢 | `MockRestServiceServer` |
-| **第三方服務** | 可能收費、有頻率限制 | Mock 付款 API、SMS API |
-| **系統資源** | 檔案系統、網路、時鐘 | Mock `Clock.now()` 固定時間 |
-| **尚未實作的依賴** | 另一個團隊還沒寫完 | Mock 介面先寫測試 |
-
-### 11.3 不該 Mock 的場景
-
-| 場景 | 為什麼不該 Mock | 該怎麼做 |
-|------|---------------|---------|
-| **被測類別自己** | Mock 了就不是在測它了 | 直接 `new` 或 `@InjectMocks` |
-| **簡單的 Value Object** | DTO、Entity 不需要 Mock | 直接 `new UserDto("Alice", "alice@example.com")` |
-| **Java 標準庫** | `String`、`List`、`Map` 永遠不該 Mock | 用真實物件 |
-| **私有方法** | 想 Mock 私有方法代表設計有問題 | 重構，把邏輯抽到可測的類別 |
-
-### 11.4 過度 Mock 的反模式
-
-```java
-// ❌ 過度 Mock：測試什麼都沒測到
-@Test
-void overMocking_example() {
-    UserDto dto = mock(UserDto.class);            // ❌ DTO 不該 Mock
-    when(dto.getName()).thenReturn("Alice");
-    when(dto.getEmail()).thenReturn("alice@example.com");
-
-    User user = mock(User.class);                 // ❌ Entity 不該 Mock
-    when(user.getId()).thenReturn(1L);
-
-    when(userRepository.save(any())).thenReturn(user);
-
-    User result = userService.create(dto);
-
-    // 這個測試看似通過了，但其實什麼都沒驗證
-    // 因為所有物件都是假的，你只是在測「Mockito 能不能正常運作」
-    verify(userRepository).save(any());
-}
-
-// ✅ 正確做法：只 Mock 邊界依賴
-@Test
-void correctMocking_example() {
-    UserDto dto = new UserDto("Alice", "alice@example.com"); // ✅ 真實 DTO
-    User savedUser = new User("Alice", "alice@example.com"); // ✅ 真實 Entity
-    savedUser.setId(1L);
-    when(userRepository.save(any(User.class))).thenReturn(savedUser); // ✅ 只 Mock Repository
-
-    User result = userService.create(dto);
-
-    assertThat(result.getId()).isEqualTo(1L);
-    assertThat(result.getName()).isEqualTo("Alice");
-}
-```
-
-### 11.5 判斷流程圖
-
-```
-你要測試的依賴是什麼？
-  │
-  ├─ 資料庫 / 外部 API / 第三方服務 / 檔案系統
-  │   └─→ ✅ Mock 它
-  │
-  ├─ DTO / Entity / Value Object / 標準庫
-  │   └─→ ❌ 不要 Mock，用真實物件
-  │
-  ├─ 你自己寫的另一個 Service
-  │   ├─ 在 Unit Test 中 → ✅ Mock 它（隔離測試）
-  │   └─ 在 Integration Test 中 → ❌ 用真實的（驗證協作）
-  │
-  └─ 被測試的類別本身
-      └─→ ❌ 絕對不要 Mock（那還測什麼？）
-```
-
----
-
-## 12. TDD 實戰示範：先寫測試再寫實作
-
-> TDD（Test-Driven Development）的核心是 **Red → Green → Refactor** 循環。
-> 用本專案的 UserService 新增一個「根據名稱搜尋」的功能來示範。
-
-### 12.1 Red-Green-Refactor 循環
-
-```
-    ┌─── Red ──────────────────┐
-    │ 先寫一個會失敗的測試       │
-    │ （因為功能還沒實作）       │
-    └──────────┬───────────────┘
-               │
-    ┌──────────▼───────────────┐
-    │ Green                     │
-    │ 寫最少的程式碼讓測試通過   │
-    │ （不求完美，只求通過）     │
-    └──────────┬───────────────┘
-               │
-    ┌──────────▼───────────────┐
-    │ Refactor                  │
-    │ 在測試保護下重構程式碼     │
-    │ （測試仍然通過 = 安全）    │
-    └──────────┬───────────────┘
-               │
-               └──→ 回到 Red，加下一個測試
-```
-
-### 12.2 實戰：為 UserService 新增搜尋功能
-
-#### Step 1: Red — 先寫失敗的測試
-
-```java
-// 在 UserServiceTest 中新增：
-@Test
-@DisplayName("searchByName - 應回傳名稱包含關鍵字的使用者")
-void searchByName_shouldReturnMatchingUsers() {
-    // Arrange
-    List<User> allUsers = Arrays.asList(
-        new User("Alice Wang", "alice@example.com"),
-        new User("Bob Smith", "bob@example.com"),
-        new User("Alice Chen", "alice.chen@example.com")
-    );
-    when(userRepository.findByNameContainingIgnoreCase("Alice"))
-        .thenReturn(Arrays.asList(allUsers.get(0), allUsers.get(2)));
-
-    // Act
-    List<User> result = userService.searchByName("Alice");
-
-    // Assert
-    assertThat(result).hasSize(2);
-    assertThat(result).extracting(User::getName)
-        .containsExactly("Alice Wang", "Alice Chen");
-}
-```
-
-此時執行測試 → **Red**（編譯失敗，因為 `searchByName` 和 `findByNameContainingIgnoreCase` 都還不存在）
-
-#### Step 2: Green — 寫最少的程式碼讓測試通過
-
-```java
-// 1. 在 UserRepository 加入查詢方法
-public interface UserRepository extends JpaRepository<User, Long> {
-    Optional<User> findByEmail(String email);
-    boolean existsByEmail(String email);
-    List<User> findByNameContainingIgnoreCase(String name); // 新增
-}
-
-// 2. 在 UserService 加入搜尋方法
-public List<User> searchByName(String name) {
-    return userRepository.findByNameContainingIgnoreCase(name);
-}
-```
-
-此時執行測試 → **Green**（測試通過！）
-
-#### Step 3: Refactor — 在測試保護下優化
-
-```java
-// 也許我們想加入「空字串就回傳全部」的邏輯
-public List<User> searchByName(String name) {
-    if (name == null || name.isBlank()) {
-        return userRepository.findAll();
-    }
-    return userRepository.findByNameContainingIgnoreCase(name);
-}
-```
-
-但在重構前，先加一個測試來描述這個行為：
-
-```java
-@Test
-@DisplayName("searchByName - 空字串應回傳所有使用者")
-void searchByName_whenBlank_shouldReturnAllUsers() {
-    List<User> allUsers = Arrays.asList(
-        new User("Alice", "alice@example.com"),
-        new User("Bob", "bob@example.com")
-    );
-    when(userRepository.findAll()).thenReturn(allUsers);
-
-    List<User> result = userService.searchByName("");
-
-    assertThat(result).hasSize(2);
-    verify(userRepository).findAll();
-    verify(userRepository, never()).findByNameContainingIgnoreCase(any());
-}
-```
-
-#### Step 4: 繼續循環
-
-接下來你可以繼續加：
-- Controller 層的 `GET /api/users/search?name=Alice` 端點
-- 對應的 `@WebMvcTest` 測試
-- Repository 的 `@DataJpaTest` 測試確認 `findByNameContainingIgnoreCase` 真的能查到資料
-
-### 12.3 TDD 的好處
-
-| 好處 | 說明 |
-|------|------|
-| **設計更好的 API** | 寫測試時你是「使用者」，會自然設計出好用的介面 |
-| **100% 測試覆蓋** | 每行程式碼都是為了讓測試通過而寫的 |
-| **安全重構** | 有測試保護，重構不會怕 |
-| **活文件** | 測試就是最新的規格說明書 |
-
-### 12.4 TDD 不是教條
-
-> 不需要「所有程式碼都用 TDD」。以下是實用建議：
-
-| 場景 | 建議 |
-|------|------|
-| 商業邏輯複雜 | **強烈建議 TDD** — 先用測試釐清需求 |
-| CRUD 簡單操作 | 可以先寫實作再補測試 |
-| 修 Bug | **用 TDD** — 先寫重現 Bug 的測試，再修 |
-| 探索性開發（Spike） | 先寫 prototype，確定方向後再用 TDD 重寫 |
+如果你也在做微服務測試，歡迎留言分享你的經驗和做法。有任何問題也歡迎討論！

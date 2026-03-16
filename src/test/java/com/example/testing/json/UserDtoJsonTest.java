@@ -24,6 +24,8 @@ class UserDtoJsonTest {
     @Autowired
     private JacksonTester<UserDto> json;
 
+    // ---- 序列化測試 ----
+
     @Test
     @DisplayName("序列化 - UserDto 應正確轉為 JSON")
     void serialize_shouldProduceCorrectJson() throws Exception {
@@ -37,6 +39,18 @@ class UserDtoJsonTest {
                 .hasJsonPathStringValue("$.email")
                 .extractingJsonPathStringValue("$.email").isEqualTo("alice@example.com");
     }
+
+    @Test
+    @DisplayName("序列化 - 應只包含預期的欄位")
+    void serialize_shouldContainExpectedFieldsOnly() throws Exception {
+        UserDto dto = new UserDto("Bob", "bob@example.com");
+
+        String jsonString = json.write(dto).getJson();
+        assertThat(jsonString).contains("\"name\"");
+        assertThat(jsonString).contains("\"email\"");
+    }
+
+    // ---- 反序列化測試 ----
 
     @Test
     @DisplayName("反序列化 - JSON 應正確轉為 UserDto")
@@ -53,6 +67,25 @@ class UserDtoJsonTest {
         assertThat(result.getName()).isEqualTo("Bob");
         assertThat(result.getEmail()).isEqualTo("bob@example.com");
     }
+
+    @Test
+    @DisplayName("反序列化 - 忽略未知欄位不應出錯")
+    void deserialize_withExtraFields_shouldIgnoreUnknown() throws Exception {
+        String content = """
+                {
+                    "name": "Charlie",
+                    "email": "charlie@example.com",
+                    "unknownField": "should be ignored"
+                }
+                """;
+
+        UserDto result = json.parseObject(content);
+
+        assertThat(result.getName()).isEqualTo("Charlie");
+        assertThat(result.getEmail()).isEqualTo("charlie@example.com");
+    }
+
+    // ---- Round-trip 測試 ----
 
     @Test
     @DisplayName("序列化後再反序列化 - 應保持一致")
