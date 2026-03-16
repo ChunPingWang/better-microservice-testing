@@ -121,6 +121,8 @@ src/test/java/com/example/testing/
 
 ## 2. 測試金字塔
 
+> 測試金字塔是 Mike Cohn 在 2009 年提出的概念。核心思想很簡單：**底層的測試寫得越多、跑得越快；頂層的測試只挑關鍵流程來寫。**
+
 ```
               ╱╲
              ╱  ╲
@@ -140,7 +142,12 @@ src/test/java/com/example/testing/
 |------|---------|------|------|------|
 | **Unit Test** | Mockito + JUnit 5 | 最多 | < 1 秒 | 單一類別 |
 | **Slice Test** | @WebMvcTest 等 | 適量 | 1-3 秒 | 特定層 |
-| **Integration Test** | @SpringBootTest | 最少 | 5-15 秒 | 完整應用 |
+| **Integration Test** | @SpringBootTest | 少量 | 5-15 秒 | 完整應用 |
+| **E2E Test** | @SpringBootTest + Testcontainers | 最少 | 10-30 秒 | 含真實基礎設施 |
+
+**為什麼是金字塔形？**
+
+越往上的測試，環境越複雜、速度越慢、除錯也越困難。如果大部分邏輯已經被底層的 Unit Test 驗證過了，上層的整合測試只需要驗證「各層串起來有沒有問題」即可。
 
 ---
 
@@ -191,10 +198,11 @@ Swagger 測試流程：
 > 初學者常把 Mock、Stub、Spy 全部叫做「Mock」，但它們其實是不同的東西，用途也不同。
 > 理解差異後，你會更清楚「這個測試場景該用哪一種」。
 
-### 四種 Test Double 對照
+### 五種 Test Double 對照
 
 | 類型 | 一句話解釋 | Mockito 對應 | 什麼時候用？ |
 |------|-----------|-------------|------------|
+| **Dummy** | 佔位用的替身 | `mock(...)` 但不設定行為 | 只是填滿參數列表，不會真的被使用 |
 | **Stub** | 回傳固定答案的替身 | `when(...).thenReturn(...)` | 你只關心「回傳什麼」，不關心「有沒有被呼叫」 |
 | **Mock** | 會驗證互動的替身 | `verify(mock).method()` | 你需要確認「某個方法確實被呼叫了」 |
 | **Spy** | 包裝真實物件，可部分覆蓋 | `@Spy` + `doReturn(...).when(spy)` | 大部分用真實邏輯，只替換其中一個方法 |
@@ -203,6 +211,10 @@ Swagger 測試流程：
 ### 用程式碼說明差異
 
 ```java
+// ===== Dummy：只是佔位，不會真正使用 =====
+UserRepository dummyRepo = mock(UserRepository.class);
+new SomeOtherService(dummyRepo);  // 只是需要一個參數填入，不會呼叫它的方法
+
 // ===== Stub：只設定回傳值，不驗證互動 =====
 @Mock
 private UserRepository userRepository;
@@ -294,6 +306,26 @@ class UserServiceSpyTest {
     }
 }
 ```
+
+### Stub vs Mock：什麼時候用哪個？
+
+這是最常被問到的問題。簡單來說：
+
+- **Stub**：你關心的是「回傳值」— 給定輸入 X，應該回傳 Y
+- **Mock**：你關心的是「互動」— 某個方法應該被呼叫（或不該被呼叫）
+
+```java
+// Stub 用法：我只關心 findById 回傳什麼
+when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+User result = userService.findById(1L);
+assertThat(result.getName()).isEqualTo("Alice");  // 驗證回傳值
+
+// Mock 用法：我關心 delete 是否真的被執行了
+userService.delete(1L);
+verify(userRepository).delete(user);  // 驗證互動
+```
+
+> **實務建議**：在 Mockito 中，`@Mock` 註解同時支援 Stub 和 Mock 行為。大多數情況下你會混合使用 — 先 Stub（`when...thenReturn`），再 Mock（`verify`）。不需要刻意區分，但理解概念有助於你寫出更好的測試。
 
 ### 選擇指南
 
@@ -556,6 +588,8 @@ void correctMocking_example() {
 
 **範例檔案**：[`src/test/java/.../unit/UserServiceTest.java`](src/test/java/com/example/testing/unit/UserServiceTest.java)
 
+本範例同時示範 Stub（驗證回傳值）和 Mock（驗證互動）的用法：
+
 ```java
 @ExtendWith(MockitoExtension.class)
 class UserServiceTest {
@@ -566,7 +600,24 @@ class UserServiceTest {
     @InjectMocks
     private UserService userService;
 
+    // ---- Stub 用法：驗證回傳值 ----
+
     @Test
+    @DisplayName("findAll - 應回傳所有使用者")
+    void findAll_shouldReturnAllUsers() {
+        List<User> users = Arrays.asList(
+                new User("Alice", "alice@example.com"),
+                new User("Bob", "bob@example.com")
+        );
+        when(userRepository.findAll()).thenReturn(users);
+
+        List<User> result = userService.findAll();
+
+        assertThat(result).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("findById - 存在時應回傳使用者")
     void findById_whenExists_shouldReturnUser() {
         User user = new User("Alice", "alice@example.com");
         user.setId(1L);
@@ -578,11 +629,69 @@ class UserServiceTest {
     }
 
     @Test
+    @DisplayName("findById - 不存在時應拋出例外")
     void findById_whenNotExists_shouldThrowException() {
         when(userRepository.findById(99L)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> userService.findById(99L))
                 .isInstanceOf(UserNotFoundException.class);
+    }
+
+    // ---- Mock 用法：驗證互動 ----
+
+    @Test
+    @DisplayName("create - 應成功建立使用者並呼叫 repository.save()")
+    void create_shouldSaveAndReturnUser() {
+        UserDto dto = new UserDto("Alice", "alice@example.com");
+        User savedUser = new User("Alice", "alice@example.com");
+        savedUser.setId(1L);
+        when(userRepository.save(any(User.class))).thenReturn(savedUser);
+
+        User result = userService.create(dto);
+
+        assertThat(result.getId()).isEqualTo(1L);
+        verify(userRepository).save(any(User.class));  // 驗證 save 確實被呼叫
+    }
+
+    @Test
+    @DisplayName("update - 應更新使用者資料")
+    void update_shouldModifyAndSaveUser() {
+        User existingUser = new User("Alice", "alice@example.com");
+        existingUser.setId(1L);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(existingUser));
+        User updatedUser = new User("Alice Updated", "alice.new@example.com");
+        updatedUser.setId(1L);
+        when(userRepository.save(any(User.class))).thenReturn(updatedUser);
+
+        UserDto updateDto = new UserDto("Alice Updated", "alice.new@example.com");
+        User result = userService.update(1L, updateDto);
+
+        assertThat(result.getName()).isEqualTo("Alice Updated");
+        verify(userRepository).findById(1L);           // 驗證先查詢
+        verify(userRepository).save(any(User.class));   // 驗證再儲存
+    }
+
+    @Test
+    @DisplayName("delete - 應刪除使用者")
+    void delete_whenExists_shouldDelete() {
+        User user = new User("Alice", "alice@example.com");
+        when(userRepository.findById(1L)).thenReturn(Optional.of(user));
+
+        userService.delete(1L);
+
+        verify(userRepository).delete(user);            // 驗證 delete 被呼叫
+        verify(userRepository, never()).save(any());    // 驗證 save 沒有被呼叫
+    }
+
+    @Test
+    @DisplayName("delete - 不存在時應拋出例外")
+    void delete_whenNotExists_shouldThrowException() {
+        when(userRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> userService.delete(99L))
+                .isInstanceOf(UserNotFoundException.class);
+
+        verify(userRepository, never()).delete(any());  // 驗證 delete 沒有被呼叫
     }
 }
 ```
@@ -609,10 +718,28 @@ class UserControllerTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private ObjectMapper objectMapper;
+
     @MockitoBean
     private UserService userService;
 
+    // ---- 查詢測試 ----
+
     @Test
+    @DisplayName("GET /api/users/{id} - 不存在時應回傳 404")
+    void getUserById_whenNotExists_shouldReturn404() throws Exception {
+        when(userService.findById(99L)).thenThrow(new UserNotFoundException(99L));
+
+        mockMvc.perform(get("/api/users/99"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("User not found with id: 99"));
+    }
+
+    // ---- 建立測試 ----
+
+    @Test
+    @DisplayName("POST /api/users - 有效資料應建立使用者 (201)")
     void createUser_withValidData_shouldReturn201() throws Exception {
         User created = new User("Alice", "alice@example.com");
         created.setId(1L);
@@ -620,17 +747,66 @@ class UserControllerTest {
 
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Alice\",\"email\":\"alice@example.com\"}"))
+                        .content(objectMapper.writeValueAsString(
+                                new UserDto("Alice", "alice@example.com"))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name", is("Alice")));
     }
 
     @Test
-    void createUser_withInvalidData_shouldReturn400() throws Exception {
+    @DisplayName("POST /api/users - 名字為空應回傳 400")
+    void createUser_withBlankName_shouldReturn400() throws Exception {
         mockMvc.perform(post("/api/users")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"\",\"email\":\"not-an-email\"}"))
-                .andExpect(status().isBadRequest());
+                        .content(objectMapper.writeValueAsString(
+                                new UserDto("", "alice@example.com"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.name").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/users - Email 格式錯誤應回傳 400")
+    void createUser_withInvalidEmail_shouldReturn400() throws Exception {
+        mockMvc.perform(post("/api/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new UserDto("Alice", "not-an-email"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.email").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/users - 缺少 Content-Type 應回傳 415")
+    void createUser_withoutContentType_shouldReturn415() throws Exception {
+        mockMvc.perform(post("/api/users")
+                        .content("{\"name\":\"Alice\",\"email\":\"alice@example.com\"}"))
+                .andExpect(status().isUnsupportedMediaType());
+    }
+
+    // ---- 更新測試 ----
+
+    @Test
+    @DisplayName("PUT /api/users/{id} - 應更新使用者 (200)")
+    void updateUser_shouldReturnUpdatedUser() throws Exception {
+        User updated = new User("Alice Updated", "alice@example.com");
+        updated.setId(1L);
+        when(userService.update(eq(1L), any())).thenReturn(updated);
+
+        mockMvc.perform(put("/api/users/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(
+                                new UserDto("Alice Updated", "alice@example.com"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name", is("Alice Updated")));
+    }
+
+    // ---- 刪除測試 ----
+
+    @Test
+    @DisplayName("DELETE /api/users/{id} - 應回傳 204")
+    void deleteUser_shouldReturn204() throws Exception {
+        mockMvc.perform(delete("/api/users/1"))
+                .andExpect(status().isNoContent());
     }
 }
 ```
@@ -661,7 +837,10 @@ class UserRepositoryTest {
     @Autowired
     private UserRepository userRepository;
 
+    // ---- 自定義查詢方法測試 ----
+
     @Test
+    @DisplayName("findByEmail - 存在時應回傳使用者")
     void findByEmail_whenExists_shouldReturnUser() {
         entityManager.persistAndFlush(new User("Alice", "alice@example.com"));
 
@@ -670,10 +849,58 @@ class UserRepositoryTest {
         assertThat(found).isPresent();
         assertThat(found.get().getName()).isEqualTo("Alice");
     }
+
+    @Test
+    @DisplayName("existsByEmail - 不存在時應回傳 false")
+    void existsByEmail_whenNotExists_shouldReturnFalse() {
+        boolean exists = userRepository.existsByEmail("nobody@example.com");
+
+        assertThat(exists).isFalse();
+    }
+
+    // ---- CRUD 基本操作測試 ----
+
+    @Test
+    @DisplayName("save - 應成功儲存使用者並產生 ID")
+    void save_shouldPersistUserWithGeneratedId() {
+        User user = new User("Alice", "alice@example.com");
+
+        User saved = userRepository.save(user);
+
+        assertThat(saved.getId()).isNotNull();
+        assertThat(entityManager.find(User.class, saved.getId())).isNotNull();
+    }
+
+    @Test
+    @DisplayName("delete - 刪除後應無法再查到")
+    void delete_shouldRemoveUser() {
+        User user = new User("Alice", "alice@example.com");
+        entityManager.persistAndFlush(user);
+        Long userId = user.getId();
+
+        userRepository.deleteById(userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(userRepository.findById(userId)).isEmpty();
+    }
+
+    // ---- 資料完整性測試 ----
+
+    @Test
+    @DisplayName("save - email 重複應拋出例外")
+    void save_withDuplicateEmail_shouldThrowException() {
+        entityManager.persistAndFlush(new User("Alice", "same@example.com"));
+
+        assertThatThrownBy(() -> {
+            userRepository.save(new User("Bob", "same@example.com"));
+            entityManager.flush();  // 強制寫入才會觸發 unique constraint
+        }).isInstanceOf(Exception.class);
+    }
 }
 ```
 
-**適用場景**：Repository Method 驗證、Custom Query（@Query）測試、Entity Mapping 驗證
+**適用場景**：Repository Method 驗證、Custom Query（@Query）測試、Entity Mapping 驗證、資料完整性約束
 
 ---
 
@@ -695,7 +922,10 @@ class UserDtoJsonTest {
     @Autowired
     private JacksonTester<UserDto> json;
 
+    // ---- 序列化測試 ----
+
     @Test
+    @DisplayName("序列化 - UserDto 應正確轉為 JSON")
     void serialize_shouldProduceCorrectJson() throws Exception {
         UserDto dto = new UserDto("Alice", "alice@example.com");
 
@@ -705,12 +935,61 @@ class UserDtoJsonTest {
     }
 
     @Test
+    @DisplayName("序列化 - 應只包含預期的欄位")
+    void serialize_shouldContainExpectedFieldsOnly() throws Exception {
+        UserDto dto = new UserDto("Bob", "bob@example.com");
+
+        String jsonString = json.write(dto).getJson();
+        assertThat(jsonString).contains("\"name\"");
+        assertThat(jsonString).contains("\"email\"");
+    }
+
+    // ---- 反序列化測試 ----
+
+    @Test
+    @DisplayName("反序列化 - JSON 應正確轉為 UserDto")
     void deserialize_shouldProduceCorrectObject() throws Exception {
-        String content = "{\"name\":\"Bob\",\"email\":\"bob@example.com\"}";
+        String content = """
+                {
+                    "name": "Bob",
+                    "email": "bob@example.com"
+                }
+                """;
 
         UserDto result = json.parseObject(content);
 
         assertThat(result.getName()).isEqualTo("Bob");
+    }
+
+    @Test
+    @DisplayName("反序列化 - 忽略未知欄位不應出錯")
+    void deserialize_withExtraFields_shouldIgnoreUnknown() throws Exception {
+        String content = """
+                {
+                    "name": "Charlie",
+                    "email": "charlie@example.com",
+                    "unknownField": "should be ignored"
+                }
+                """;
+
+        UserDto result = json.parseObject(content);
+
+        assertThat(result.getName()).isEqualTo("Charlie");
+        assertThat(result.getEmail()).isEqualTo("charlie@example.com");
+    }
+
+    // ---- Round-trip 測試 ----
+
+    @Test
+    @DisplayName("序列化後再反序列化 - 應保持一致")
+    void roundTrip_shouldMaintainConsistency() throws Exception {
+        UserDto original = new UserDto("Alice", "alice@example.com");
+
+        String jsonString = json.write(original).getJson();
+        UserDto restored = json.parseObject(jsonString);
+
+        assertThat(restored.getName()).isEqualTo(original.getName());
+        assertThat(restored.getEmail()).isEqualTo(original.getEmail());
     }
 }
 ```
@@ -741,6 +1020,7 @@ class ExternalApiClientTest {
     private MockRestServiceServer mockServer;
 
     @Test
+    @DisplayName("fetchUser - 應正確解析外部 API 回應")
     void fetchUser_shouldParseResponse() {
         mockServer.expect(requestTo("https://api.example.com/users/123"))
                 .andRespond(withSuccess(
@@ -750,6 +1030,30 @@ class ExternalApiClientTest {
         UserDto result = externalApiClient.fetchUserFromExternalApi("123");
 
         assertThat(result.getName()).isEqualTo("External User");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchUser - 外部 API 回傳 404 時應拋出例外")
+    void fetchUser_when404_shouldThrowException() {
+        mockServer.expect(requestTo("https://api.example.com/users/999"))
+                .andRespond(withResourceNotFound());
+
+        assertThatThrownBy(() -> externalApiClient.fetchUserFromExternalApi("999"))
+                .isInstanceOf(Exception.class);
+
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchUser - 外部 API 回傳 500 時應拋出例外")
+    void fetchUser_when500_shouldThrowException() {
+        mockServer.expect(requestTo("https://api.example.com/users/123"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> externalApiClient.fetchUserFromExternalApi("123"))
+                .isInstanceOf(Exception.class);
+
         mockServer.verify();
     }
 }
@@ -779,6 +1083,7 @@ class UserIntegrationTest {
     private TestRestTemplate restTemplate;
 
     @Test
+    @DisplayName("完整 CRUD 流程")
     void fullCrudFlow() {
         // Create
         UserDto dto = new UserDto("Alice", "alice@example.com");
@@ -789,6 +1094,32 @@ class UserIntegrationTest {
         Long id = response.getBody().getId();
         ResponseEntity<User> getResponse = restTemplate.getForEntity("/api/users/" + id, User.class);
         assertThat(getResponse.getBody().getName()).isEqualTo("Alice");
+    }
+
+    @Test
+    @DisplayName("建立多筆使用者後查詢列表")
+    void createMultipleUsers_shouldReturnAll() {
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Alice", "alice@example.com"), User.class);
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Bob", "bob@example.com"), User.class);
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Charlie", "charlie@example.com"), User.class);
+
+        ResponseEntity<List<User>> response = restTemplate.exchange(
+                "/api/users", HttpMethod.GET, null,
+                new ParameterizedTypeReference<>() {});
+
+        assertThat(response.getBody()).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("查詢不存在的使用者應回傳 404")
+    void getUserById_whenNotExists_shouldReturn404() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/users/99999", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 }
 ```
@@ -803,7 +1134,7 @@ class UserIntegrationTest {
 
 ### 為什麼需要 Testcontainers？
 
-使用 H2 記憶體資料庫做測試雖然方便快速，但存在問題：
+還記得前面 Test Doubles 章節提到的 **Fake** 嗎？H2 記憶體資料庫就是一個 Fake — 它是真的資料庫，但比 PostgreSQL 輕量。大部分情況下 H2 夠用了，但有時你會踩到 H2 和真實資料庫之間的差異：
 
 | 問題 | 說明 |
 |------|------|
@@ -872,6 +1203,18 @@ class UserPostgresIntegrationTest {
         UserDto dto = new UserDto("Alice", "alice@example.com");
         ResponseEntity<User> response = restTemplate.postForEntity("/api/users", dto, User.class);
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+    }
+
+    @Test
+    void uniqueEmailConstraint_withRealPostgres() {
+        // 這個測試驗證 PostgreSQL 的 unique constraint 行為
+        // 在 H2 上可能行為不同！
+        restTemplate.postForEntity("/api/users",
+                new UserDto("Alice", "same@example.com"), User.class);
+        ResponseEntity<String> response = restTemplate.postForEntity("/api/users",
+                new UserDto("Bob", "same@example.com"), String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }
 ```
@@ -1145,7 +1488,7 @@ class UserClientContractTest {
 
 ## 16. TDD 實戰示範：先寫測試再寫實作
 
-> TDD（Test-Driven Development）的核心是 **Red → Green → Refactor** 循環。
+> TDD（Test-Driven Development）是由 Kent Beck 在 2003 年正式提出的開發方法論。核心是 **Red → Green → Refactor** 循環。
 > 用本專案的 UserService 新增一個「根據名稱搜尋」的功能來示範。
 
 ### 16.1 Red-Green-Refactor 循環
@@ -1277,3 +1620,5 @@ void searchByName_whenBlank_shouldReturnAllUsers() {
 | CRUD 簡單操作 | 可以先寫實作再補測試 |
 | 修 Bug | **用 TDD** — 先寫重現 Bug 的測試，再修 |
 | 探索性開發（Spike） | 先寫 prototype，確定方向後再用 TDD 重寫 |
+
+> **務實的做法**：你不需要 100% TDD。對核心業務邏輯用 TDD，對簡單的 CRUD 和膠水程式碼（glue code），先寫實作再補測試也完全可以。重要的是**有測試**，而不是**什麼時候寫測試**。

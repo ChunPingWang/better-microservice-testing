@@ -11,13 +11,14 @@ import org.springframework.test.context.ActiveProfiles;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * @DataJpaTest 切片測試範例 — 測試 Repository 層
  *
  * 特點：
  * - 只載入 JPA 相關的 Bean（Entity, Repository, TestEntityManager）
- * - 預設使用內嵌的 H2 資料庫
+ * - 預設使用內嵌的 H2 資料庫（Fake）
  * - 每個測試方法結束後自動 rollback
  * - 不載入 Controller、Service 等其他層的 Bean
  */
@@ -30,6 +31,8 @@ class UserRepositoryTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    // ---- 自定義查詢方法測試 ----
 
     @Test
     @DisplayName("findByEmail - 存在時應回傳使用者")
@@ -64,6 +67,16 @@ class UserRepositoryTest {
 
         assertThat(exists).isTrue();
     }
+
+    @Test
+    @DisplayName("existsByEmail - 不存在時應回傳 false")
+    void existsByEmail_whenNotExists_shouldReturnFalse() {
+        boolean exists = userRepository.existsByEmail("nobody@example.com");
+
+        assertThat(exists).isFalse();
+    }
+
+    // ---- CRUD 基本操作測試 ----
 
     @Test
     @DisplayName("save - 應成功儲存使用者並產生 ID")
@@ -104,5 +117,32 @@ class UserRepositoryTest {
         assertThat(result).hasSize(2);
         assertThat(result).extracting(User::getName)
                 .containsExactlyInAnyOrder("Alice Wang", "Alice Chen");
+    }
+
+    @Test
+    @DisplayName("delete - 刪除後應無法再查到")
+    void delete_shouldRemoveUser() {
+        User user = new User("Alice", "alice@example.com");
+        entityManager.persistAndFlush(user);
+        Long userId = user.getId();
+
+        userRepository.deleteById(userId);
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(userRepository.findById(userId)).isEmpty();
+    }
+
+    // ---- 資料完整性測試 ----
+
+    @Test
+    @DisplayName("save - email 重複應拋出例外")
+    void save_withDuplicateEmail_shouldThrowException() {
+        entityManager.persistAndFlush(new User("Alice", "same@example.com"));
+
+        assertThatThrownBy(() -> {
+            userRepository.save(new User("Bob", "same@example.com"));
+            entityManager.flush();  // 強制寫入才會觸發 unique constraint
+        }).isInstanceOf(Exception.class);
     }
 }

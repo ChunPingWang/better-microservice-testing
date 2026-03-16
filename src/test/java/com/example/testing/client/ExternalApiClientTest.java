@@ -9,7 +9,10 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withResourceNotFound;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
@@ -31,7 +34,7 @@ class ExternalApiClientTest {
     private MockRestServiceServer mockServer;
 
     @Test
-    @DisplayName("fetchUserFromExternalApi - 應正確解析外部 API 回應")
+    @DisplayName("fetchUser - 應正確解析外部 API 回應")
     void fetchUser_shouldParseResponse() {
         String responseJson = """
                 {
@@ -47,6 +50,30 @@ class ExternalApiClientTest {
 
         assertThat(result.getName()).isEqualTo("External User");
         assertThat(result.getEmail()).isEqualTo("external@example.com");
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchUser - 外部 API 回傳 404 時應拋出例外")
+    void fetchUser_when404_shouldThrowException() {
+        mockServer.expect(requestTo("https://api.example.com/users/999"))
+                .andRespond(withResourceNotFound());
+
+        assertThatThrownBy(() -> externalApiClient.fetchUserFromExternalApi("999"))
+                .isInstanceOf(Exception.class);
+
+        mockServer.verify();
+    }
+
+    @Test
+    @DisplayName("fetchUser - 外部 API 回傳 500 時應拋出例外")
+    void fetchUser_when500_shouldThrowException() {
+        mockServer.expect(requestTo("https://api.example.com/users/123"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> externalApiClient.fetchUserFromExternalApi("123"))
+                .isInstanceOf(Exception.class);
+
         mockServer.verify();
     }
 }
